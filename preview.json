@@ -1,0 +1,9 @@
+{
+  "branch": "rewrite/agent-ebooks",
+  "commits": {
+    "ai-engineer": "439d3f3 2026-10-20 docs(ebook): add rewritten AI engineer reading edition",
+    "agent-memory": "158415b 2026-10-20 docs(ebook): rewrite chapters, illustrations, and examples",
+    "ai-infra": "7c9d15f 2026-10-20 docs(ebook): rewrite chapters, illustrations, and examples",
+    "langchain-langgraph": "d79497c 2026-10-20 docs(ebook): rewrite chapters, illustrations, and examples"
+  }
+}

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="LangChain 与 LangGraph 源码驱动中文电子书">
+<title>不用框架，先写出 Agent 循环 · LangChain × LangGraph</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">LC×LG</span><span>LangChain × LangGraph</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 02</div><div class="rail-title">不用框架，先写出 Agent 循环</div><ol><li><a href="#一次调用的完整轨迹">一次调用的完整轨迹</a></li><li><a href="#工具-schema-是合同">工具 schema 是合同</a></li><li><a href="#错误也是下一轮输入">错误也是下一轮输入</a></li><li><a href="#步数上限是安全边界">步数上限是安全边界</a></li><li><a href="#副作用应在哪里发生">副作用应在哪里发生</a></li><li><a href="#离线运行本章示例">离线运行本章示例</a></li><li><a href="#与框架的对应关系">与框架的对应关系</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 02 章</div><h1>不用框架，先写出 Agent 循环</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 12 分钟</div></header><div class="prose"><p>先把天文台助手缩到两个能力：查教学规则、估算拍摄时长。模型只决定请求什么，Python 执行器真正调用函数，再把观察交回模型。即便模型由固定脚本代替，请求、执行和回填三者也不能省略。</p>
+<p>下面是控制结构的伪代码，不是某个 provider 的请求格式：</p>
+<pre><code class="language-python">history = [user_question]
+remaining = 4
+while remaining &gt; 0:
+    remaining -= 1
+    proposal = model(history, exposed_tools)
+    history.append(proposal)
+    if not proposal.calls:
+        break
+    observations = [dispatch(call) for call in proposal.calls]
+    history.extend(observations)
+else:
+    raise RuntimeError(&quot;model turn budget exhausted&quot;)
+</code></pre>
+<p>一次模型响应里可以有多个调用，所以预算扣的是模型轮次，不是工具数。先把该轮所有观察补齐，再进入下一轮，能避免模型在缺了一半结果时做结论。</p>
+<h2 id="一次调用的完整轨迹">一次调用的完整轨迹<a class="anchor" href="#一次调用的完整轨迹" aria-label="链接到本节">#</a></h2>
+<p>固定输入为“研究 Halpha 观测申请：6 帧，每帧 180 秒”。示例的脚本模型产生资料查询和预算计算两个请求，执行器依次处理它们。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>位置</th>
+<th>消息身份</th>
+<th>可检查的内容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0</td>
+<td>user</td>
+<td>用户问题与固定教学场景</td>
+</tr>
+<tr>
+<td>1</td>
+<td>assistant</td>
+<td><code>obs-rule</code> 请求 <code>search_notes</code>，<code>obs-time</code> 请求 <code>estimate_time</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>tool</td>
+<td><code>obs-rule</code> 对应 <code>SIM-FILTER-2</code> 与 <code>SIM-TIME-4</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>tool</td>
+<td><code>obs-time</code> 对应总时长 1500 秒及计算式</td>
+</tr>
+<tr>
+<td>4</td>
+<td>assistant</td>
+<td>用资料编号说明预算，同时声明未提交真实申请</td>
+</tr>
+</tbody></table></div>
+<p>执行器检查调用名称属于注册集合，并保留每个请求的 ID。工具消息即使调换到达顺序，也能靠 ID 还原关系；不过实际 provider 对消息排列的额外要求仍需适配层满足。</p>
+<h3 id="模型为什么还要再读一次工具结果">模型为什么还要再读一次工具结果<a class="anchor" href="#模型为什么还要再读一次工具结果" aria-label="链接到本节">#</a></h3>
+<p>第一次响应没有计算结果，只表达需要规则和预算。如果工具在 Python 中算出 1500，却只打印到终端而不回填消息，下一次模型调用依然没有这项观察。外部函数执行成功不会自动改变模型上下文。</p>
+<p>完整结果还应包括适用范围。这里的 1500 只覆盖曝光、读出和校准，不涵盖真实排班。模型读到这条限制，才能把结论写成模拟预算建议。如果两项工具只返回其中一个，最终消息应该等待或报告缺失，不能用另一项代替。</p>
+<h2 id="工具-schema-是合同">工具 schema 是合同<a class="anchor" href="#工具-schema-是合同" aria-label="链接到本节">#</a></h2>
+<p>预算函数的 schema 可以把数值范围直接告诉模型。以下为示例中的工具定义形状，不是远程请求的完整外壳：</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;estimate_time&quot;,
+  &quot;description&quot;: &quot;估算教学申请时长，不查询真实排班&quot;,
+  &quot;parameters&quot;: {
+    &quot;type&quot;: &quot;object&quot;,
+    &quot;properties&quot;: {
+      &quot;frames&quot;: {&quot;type&quot;: &quot;integer&quot;, &quot;minimum&quot;: 1, &quot;maximum&quot;: 30},
+      &quot;exposure_s&quot;: {&quot;type&quot;: &quot;integer&quot;, &quot;minimum&quot;: 1, &quot;maximum&quot;: 600}
+    },
+    &quot;required&quot;: [&quot;frames&quot;, &quot;exposure_s&quot;],
+    &quot;additionalProperties&quot;: false
+  }
+}
+</code></pre>
+<p>描述限定用途，schema 限定结构，执行函数再次校验范围。手写例子没有引入 JSON Schema 校验器，参数的最终保障来自 <code>estimate_time()</code> 中的显式判断。Python 的 <code>bool</code> 是 <code>int</code> 子类，因此函数用 <code>type(value) is int</code> 排除 <code>True</code> 被当作一帧，避免演示程序在边界输入上悄悄通过。</p>
+<h2 id="错误也是下一轮输入">错误也是下一轮输入<a class="anchor" href="#错误也是下一轮输入" aria-label="链接到本节">#</a></h2>
+<p>模型请求了不存在的工具时，执行器返回 <code>unknown_tool</code>；帧数为负数时返回 <code>invalid_arguments</code>。这些是可理解的观察，模型可以停止或调整方案。错误结果仍要带原调用 ID，不能因为执行失败就跳过回填。</p>
+<p>依赖故障则不应全转成“参数不对”。示例只捕获 <code>TypeError</code> 和 <code>ValueError</code>，意外运行故障会传播出去，方便测试暴露真实问题。接入远程服务后，应另行定义有限重试、失败分类与脱敏信息，而不是用一个宽泛 <code>except Exception</code> 把所有故障写进聊天记录。</p>
+<h3 id="哪些错误应该让模型改计划">哪些错误应该让模型改计划<a class="anchor" href="#哪些错误应该让模型改计划" aria-label="链接到本节">#</a></h3>
+<p>资料查询返回 <code>no_match</code>，意味着当前允许搜索的语料没有命中。示例最后会说明证据不足，即使时长算得出来也停止建议。它没有偷偷退回一份默认资料，让未知问题看起来已研究完成。</p>
+<p>若真实资料服务超时，应用尚未得到可解释的检索结果。此时应该按依赖故障处理，而不是诱导模型换同义词查询。权限拒绝也不能靠改写 query 绕过，重试策略要保留原授权主体和允许范围。错误文字只提供行动依据，不应泄露连接信息或内部堆栈。</p>
+<h2 id="步数上限是安全边界">步数上限是安全边界<a class="anchor" href="#步数上限是安全边界" aria-label="链接到本节">#</a></h2>
+<p>例子默认允许四次模型响应，正常轨迹只用两次。若把上限改为 1，工具可以已经返回，但模型还没得到最后一次组织答案的机会，函数会抛出预算耗尽异常。应用应把这种结果显示为未完成，而非截取最后一条工具文本充当最终答案。</p>
+<p>实际程序还需要墙钟截止时间、工具调用额度和费用预算。模型轮次、工具数与图 super-step 是不同计数器：一轮可以请求多个工具，一次模型工具循环也会跨多个图步骤。为每个预算标明计数口径，告警才不会把合理并行误认成失控。</p>
+<h2 id="副作用应在哪里发生">副作用应在哪里发生<a class="anchor" href="#副作用应在哪里发生" aria-label="链接到本节">#</a></h2>
+<p>本章工具都是只读或纯计算，不会占用观测窗口。若以后增加 <code>submit_proposal</code>，执行器要在调用领域服务前检查申请版本、批准人和业务幂等身份。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>执行阶段</th>
+<th>收到的对象</th>
+<th>可以作出的判断</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>解析请求</td>
+<td>工具名、参数、调用 ID</td>
+<td>是否是完整、已注册的调用</td>
+</tr>
+<tr>
+<td>领域校验</td>
+<td>申请编号、当前版本、服务端身份</td>
+<td>该主体是否可提交该版本</td>
+</tr>
+<tr>
+<td>副作用提交</td>
+<td>稳定业务键</td>
+<td>重试时返回原结果还是新建</td>
+</tr>
+<tr>
+<td>结果回填</td>
+<td>回执或明确失败</td>
+<td>下一轮模型可据此解释什么</td>
+</tr>
+</tbody></table></div>
+<p>工具调用 ID 标识一次模型请求，业务键标识一次申请动作，两者不必相同。模型重新规划可能生成新 ID，但同一批准版本不能因此占用两次时段。系统提示中的“不要重复提交”无法提供这项保证。</p>
+<h2 id="离线运行本章示例">离线运行本章示例<a class="anchor" href="#离线运行本章示例" aria-label="链接到本节">#</a></h2>
+<p>保留原命令入口：</p>
+<pre><code class="language-bash">python3 examples/mini_agent.py
+</code></pre>
+<p>程序先运行内置断言，再打印 JSON 轨迹。正常角色序列是 <code>user、assistant、tool、tool、assistant</code>，其中两项工具观察分别包含资料记录和 <code>total_s=1500</code>。所有输入资料和模型响应都在本地构造，不需要密钥，也没有验证语言模型的推理能力。</p>
+<h3 id="停止条件要与任务进展一起看">停止条件要与任务进展一起看<a class="anchor" href="#停止条件要与任务进展一起看" aria-label="链接到本节">#</a></h3>
+<p>“没有工具调用”只意味着脚本或模型给出终止响应。资料是否够用，要从结果状态判断。未知问题应返回缺证据说明；已命中规则的申请才能给模拟时长建议。把这两条路径都跑一遍，比只检查正常答案更能发现默认回退掩盖缺失的问题。</p>
+<p>若模型反复查询同一资料，比较本轮新增的来源和已尝试参数。没有新证据且预算下降，适合停止并请求澄清；补到了不同版本规则，可能有继续研究的必要。上限负责兜底，进展检查决定是否值得花掉下一轮。</p>
+<h2 id="与框架的对应关系">与框架的对应关系<a class="anchor" href="#与框架的对应关系" aria-label="链接到本节">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>手写例子的责任</th>
+<th>框架中的相应位置</th>
+<th>不应遗漏的应用责任</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>scripted_model</code></td>
+<td>聊天模型 <code>invoke</code></td>
+<td>provider 能力核验</td>
+</tr>
+<tr>
+<td><code>Tool.schema</code></td>
+<td>工具 schema 转换</td>
+<td>描述与范围准确</td>
+</tr>
+<tr>
+<td><code>execute</code></td>
+<td><code>ToolNode</code> 或工具 wrapper</td>
+<td>授权与副作用政策</td>
+</tr>
+<tr>
+<td>本地消息列表</td>
+<td>消息状态与 <code>add_messages</code></td>
+<td>历史清理不破坏调用闭环</td>
+</tr>
+<tr>
+<td>模型轮次计数</td>
+<td>图循环与步数限制</td>
+<td>独立费用和时间预算</td>
+</tr>
+<tr>
+<td>观察中的失败状态</td>
+<td>工具错误处理</td>
+<td>业务空结果与依赖故障区分</td>
+</tr>
+<tr>
+<td>当前进程保存</td>
+<td>Checkpointer</td>
+<td>选择持久实现并保护 thread 归属</td>
+</tr>
+</tbody></table></div>
+<p>迁移时可以逐个替换这些责任，保留同一批离线断言。不要在换入框架时顺便把所有权限判断移进 prompt，否则控制循环更完善了，执行边界却变弱了。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="01-two-layers.html"><small>上一章</small><strong>四层栈，一条执行链</strong></a><a class="next" href="03-messages.html"><small>下一章</small><strong>消息是运行时协议，不是聊天字符串</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：这本书怎么读</a><a href="../chapters/01-two-layers.html"><span>01</span>四层栈，一条执行链</a><a href="../chapters/02-loop-from-scratch.html"><span>02</span>不用框架，先写出 Agent 循环</a><a href="../chapters/03-messages.html"><span>03</span>消息是运行时协议，不是聊天字符串</a><a href="../chapters/04-tools.html"><span>04</span>工具调用：Schema、执行与结果回填</a><a href="../chapters/05-runnables.html"><span>05</span>Runnable 与 LCEL：统一调用表面</a><a href="../chapters/06-create-agent.html"><span>06</span>create_agent 到底创建了什么</a><a href="../chapters/07-stategraph.html"><span>07</span>StateGraph：状态、节点、边与 reducer</a><a href="../chapters/08-control-flow.html"><span>08</span>路由、循环与 Command</a><a href="../chapters/09-pregel.html"><span>09</span>Pregel：图在运行时如何前进</a><a href="../chapters/10-persistence.html"><span>10</span>检查点与 Store：两种记忆边界</a><a href="../chapters/11-interrupts.html"><span>11</span>中断、重放与人工审批</a><a href="../chapters/12-streaming.html"><span>12</span>流式输出不是一种流</a><a href="../chapters/13-subgraphs.html"><span>13</span>子图与多 Agent：先隔离上下文</a><a href="../chapters/14-project.html"><span>14</span>完整案例：观测申请的证据与审批</a><a href="../chapters/15-production.html"><span>15</span>生产检查表与源码阅读路线</a><a href="../chapters/16-deep-agents.html"><span>16</span>Deep Agents：create_agent 之上的 harness</a><a href="../chapters/17-multi-agent-mcp.html"><span>17</span>多 Agent 与 MCP：协作模式与工具互联</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语与 API 速查</a><a href="../chapters/appendix-sources.html"><span>B</span>来源、版本与原创性说明</a></nav>
+</dialog>
+<footer class="site-footer">基于官方源码快照独立撰写 · LangChain 1.4.2 · LangGraph 1.2.12</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

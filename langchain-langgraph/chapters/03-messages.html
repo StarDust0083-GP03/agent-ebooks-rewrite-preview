@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="LangChain 与 LangGraph 源码驱动中文电子书">
+<title>消息是运行时协议，不是聊天字符串 · LangChain × LangGraph</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">LC×LG</span><span>LangChain × LangGraph</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 03</div><div class="rail-title">消息是运行时协议，不是聊天字符串</div><ol><li><a href="#常见消息类型">常见消息类型</a></li><li><a href="#内容块与元数据">内容块与元数据</a></li><li><a href="#工具调用必须闭环">工具调用必须闭环</a></li><li><a href="#artifact-不等于-content">artifact 不等于 content</a></li><li><a href="#消息-reducer-为什么特殊">消息 reducer 为什么特殊</a></li><li><a href="#流式-chunk-如何变成最终消息">流式 chunk 如何变成最终消息</a></li><li><a href="#上下文不是越长越好">上下文不是越长越好</a></li><li><a href="#源码入口">源码入口</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 03 章</div><h1>消息是运行时协议，不是聊天字符串</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 12 分钟</div></header><div class="prose"><p>天文台助手收到两份数值都为 1500 的结果，不代表它们可以互换。一份可能是预算秒数，另一份可能是资料表中的探测器编号。消息需要记录说话者、请求身份、内容类型和附加数据，程序才有依据把观察送往正确位置。</p>
+<p>LangChain 的消息对象提供这种结构。文本是其中一部分，空文本也可能承载完整调用；从显示界面上看不到的字段，同样可能影响执行、流式合并和恢复。</p>
+<h2 id="常见消息类型">常见消息类型<a class="anchor" href="#常见消息类型" aria-label="链接到本节">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>对象</th>
+<th>在申请助手中的用途</th>
+<th>不能据此推断的事</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>SystemMessage</code></td>
+<td>设置可引用范围与输出要求</td>
+<td>无法替代工具授权</td>
+</tr>
+<tr>
+<td><code>HumanMessage</code></td>
+<td>承载申请人的研究问题</td>
+<td>不证明自述身份可信</td>
+</tr>
+<tr>
+<td><code>AIMessage</code></td>
+<td>生成建议或 <code>tool_calls</code></td>
+<td>不证明请求已执行</td>
+</tr>
+<tr>
+<td><code>ToolMessage</code></td>
+<td>送回预算与资料观察</td>
+<td>不保证外部材料真实</td>
+</tr>
+<tr>
+<td><code>AIMessageChunk</code></td>
+<td>增量展示生成过程</td>
+<td>不保证当前参数已完整</td>
+</tr>
+</tbody></table></div>
+<p>同一个对象还可能带响应元数据和 token 用量。应用可以用这些字段做诊断，但业务结论应有明确来源，不能用模型响应中的自信语气代替资料证据。</p>
+<h3 id="同一句文字放进不同消息-会改变含义">同一句文字放进不同消息，会改变含义<a class="anchor" href="#同一句文字放进不同消息-会改变含义" aria-label="链接到本节">#</a></h3>
+<p>“窗口为 1800 秒”若来自用户，是待核对的输入；若来自排班工具，是一项外部观察；若来自模型，是它生成的陈述。把它们拼成一段无角色文本后，后续节点便难以判断应优先信任哪项信息。</p>
+<p>资料中还可能出现“请立即批准”的句子。即便这段内容由工具读回，也只是资料内容，不能提升为系统命令。保留 <code>ToolMessage</code> 的来源边界有助于隔离它，但最终仍需应用选择如何使用这些文字。</p>
+<h2 id="内容块与元数据">内容块与元数据<a class="anchor" href="#内容块与元数据" aria-label="链接到本节">#</a></h2>
+<p>观测研究可能同时使用文字规则和仪器图像。provider 对图像 URL、文件引用和音频的表示不同，消息的标准内容块用于减少业务与原生格式的耦合。不能假定每条 <code>content</code> 都是可以直接 <code>.strip()</code> 的字符串。</p>
+<p>建议在进入草稿节点前做一次适配：提取允许的文本与图像引用，保留必要来源，其他 provider 特有数据留给观测层。遇到必须读取 <code>additional_kwargs</code> 的能力，把判断集中到适配函数，并用目标 provider 的小型合同测试固定行为。</p>
+<p>usage 适合计费统计，响应 ID 适合排障；它们不会让 <code>total_s</code> 自动成为业务字段。业务预算来自工具或领域计算，模型 token 成本来自元数据，两类单位应分别记录。</p>
+<h2 id="工具调用必须闭环">工具调用必须闭环<a class="anchor" href="#工具调用必须闭环" aria-label="链接到本节">#</a></h2>
+<p>以下代码可在安装 <code>langchain-core</code> 后运行，构造一次资料查询的请求与结果：</p>
+<pre><code class="language-python">from langchain_core.messages import AIMessage, ToolMessage
+
+request = AIMessage(content=&quot;&quot;, tool_calls=[{
+    &quot;name&quot;: &quot;lookup_observatory_rule&quot;,
+    &quot;args&quot;: {&quot;rule_id&quot;: &quot;SIM-TIME-4&quot;},
+    &quot;id&quot;: &quot;timing-rule-request&quot;,
+    &quot;type&quot;: &quot;tool_call&quot;,
+}])
+observation = ToolMessage(
+    content=&quot;教学记录 r1：逐帧读出 20 秒，固定校准 300 秒。&quot;,
+    tool_call_id=request.tool_calls[0][&quot;id&quot;],
+)
+assert observation.tool_call_id == &quot;timing-rule-request&quot;
+</code></pre>
+<p>这段代码只创建协议对象，不执行检索。执行器应为本轮每个请求生成匹配观察，包括可恢复的失败。丢弃空 <code>content</code> 的 <code>request</code> 会让剩下的工具消息失去前置请求，实际 provider 可能据此拒绝下一轮输入。</p>
+<h3 id="调用-id-为什么比工具名称更重要">调用 ID 为什么比工具名称更重要<a class="anchor" href="#调用-id-为什么比工具名称更重要" aria-label="链接到本节">#</a></h3>
+<p>比较 6 帧与 8 帧方案时，模型可在一轮中请求两次 <code>estimate_time</code>。对应结果分别为 1500 秒和 1900 秒；用工具名作字典键会覆盖一项，而两个不同调用 ID 可以保留两份参数关系。</p>
+<p>历史压缩也要维护这个关系。删去请求却保留结果，或者只保留两项结果中的一项，都可能造成未闭合工具轮次。对于仍需送给 provider 的近期消息，以完整交互为单位保留；更早已完成的研究可以变成带引用摘要。</p>
+<h2 id="artifact-不等于-content">artifact 不等于 content<a class="anchor" href="#artifact-不等于-content" aria-label="链接到本节">#</a></h2>
+<p>假设工具读取了 200 行模拟仪器参数，模型只需要其中两个开销值。<code>content</code> 可以放校准与读出的摘要，<code>artifact</code> 则保存结构化表或外部对象引用，供页面展示和后续程序使用。</p>
+<p>模型没有看到 artifact，不意味着它不会进入 checkpoint、日志或调试事件。应优先保留小型版本化引用，避免把整份图像或表格反复写入状态。需要完整留档时，明确外部存储的访问控制与删除策略，不能仅靠消息字段名隐藏数据。</p>
+<h2 id="消息-reducer-为什么特殊">消息 reducer 为什么特殊<a class="anchor" href="#消息-reducer-为什么特殊" aria-label="链接到本节">#</a></h2>
+<p>普通列表相加只能追加。对话还会修正消息、删除指定消息和规范化不同输入形状，所以 LangGraph 用 <code>add_messages</code> 实现按 ID 的合并，<code>MessagesState</code> 为 <code>messages</code> 配好这个 reducer。</p>
+<pre><code class="language-python">from langchain_core.messages import AIMessage
+from langgraph.graph.message import add_messages
+
+old = [AIMessage(id=&quot;budget-summary&quot;, content=&quot;预算待计算&quot;)]
+new = add_messages(old, [AIMessage(id=&quot;budget-summary&quot;, content=&quot;模拟预算 1500 秒&quot;)])
+assert len(new) == 1
+assert new[0].content == &quot;模拟预算 1500 秒&quot;
+</code></pre>
+<p>稳定 ID 使这次返回表示修正。如果节点返回整份历史，新的无 ID 消息可能再次被分配身份，形成重复项。明确是修改已有消息还是追加观察，比把所有节点返回值统一做列表相加更重要。</p>
+<h2 id="流式-chunk-如何变成最终消息">流式 chunk 如何变成最终消息<a class="anchor" href="#流式-chunk-如何变成最终消息" aria-label="链接到本节">#</a></h2>
+<p>工具参数可能跨多个 chunk 才完整：一个片段含 <code>{&quot;frames&quot;:</code>，下一个片段含 <code>6,&quot;exposure_s&quot;:</code>，最后才出现 <code>180}</code>。在此之前，没有可验证的完整调用。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>接收时点</th>
+<th>可以展示什么</th>
+<th>可以执行什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>获得工具名片段</td>
+<td>正在准备预算计算</td>
+<td>暂不执行</td>
+</tr>
+<tr>
+<td>收到部分参数</td>
+<td>可选的诊断预览</td>
+<td>仍不执行</td>
+</tr>
+<tr>
+<td>合并成最终调用</td>
+<td>展示完整帧数和单位</td>
+<td>校验与授权后执行</td>
+</tr>
+</tbody></table></div>
+<p>通常由框架负责 <code>AIMessageChunk</code> 合并，自定义转发层仍需区分增量和终态。不能把每个看起来可解析的局部 JSON 都运行一次；参数也可能尚未到齐或被后续片段补全。</p>
+<h2 id="上下文不是越长越好">上下文不是越长越好<a class="anchor" href="#上下文不是越长越好" aria-label="链接到本节">#</a></h2>
+<p>第十轮修改申请时，模型通常需要当前问题、最新规则、现行草稿和未解决意见，不需要每一次工具重试的完整堆栈。状态可以保存恢复所需数据，模型请求则由当前步骤选择一个较窄视图。</p>
+<p>可把旧研究压成“规则 r1、计算条件、未核验事项”的摘要，保留最近完整消息交互；跨申请偏好从 store 按需检索。原始记录、模型上下文和用户事件分别有生命周期，不能用一个无限增长的 <code>messages</code> 同时承担所有任务。</p>
+<h3 id="用消息-id-区分修正与新增">用消息 ID 区分修正与新增<a class="anchor" href="#用消息-id-区分修正与新增" aria-label="链接到本节">#</a></h3>
+<p>草稿摘要从“待算”变为“1500 秒”，适合修正同一 ID；之后新增天气观察，应使用新 ID。若为方便总给所有 <code>AIMessage</code> 同一编号，<code>add_messages</code> 会覆盖先前消息，资料链可能被无声缩短。</p>
+<p>检查上下文治理时，可以统计 ID 是否唯一、工具请求是否闭合、摘要能否追到规则版本。还应测试 artifact 不出现在模型请求中，以及其是否仍出现在其他出口。不同可见范围需要不同断言，单看页面文字不足以确认数据安全。</p>
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><code>langchain_core/messages/base.py</code>：检查内容、公共字段及序列化边界。</li>
+<li><code>langchain_core/messages/ai.py</code>：从最终调用与 chunk 合并代码核对执行时机。</li>
+<li><code>langchain_core/messages/tool.py</code>：定位结果 ID 和 artifact 的定义。</li>
+<li><code>langgraph/graph/message.py</code>：用同 ID、不同 ID、删除消息三种输入观察合并结果。</li>
+</ul>
+<p>这些路径相对于归档仓库中的包目录。阅读时先找对象字段，再跟转换函数，避免把某个 provider 的原生消息结构当成通用合同。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="02-loop-from-scratch.html"><small>上一章</small><strong>不用框架，先写出 Agent 循环</strong></a><a class="next" href="04-tools.html"><small>下一章</small><strong>工具调用：Schema、执行与结果回填</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：这本书怎么读</a><a href="../chapters/01-two-layers.html"><span>01</span>四层栈，一条执行链</a><a href="../chapters/02-loop-from-scratch.html"><span>02</span>不用框架，先写出 Agent 循环</a><a href="../chapters/03-messages.html"><span>03</span>消息是运行时协议，不是聊天字符串</a><a href="../chapters/04-tools.html"><span>04</span>工具调用：Schema、执行与结果回填</a><a href="../chapters/05-runnables.html"><span>05</span>Runnable 与 LCEL：统一调用表面</a><a href="../chapters/06-create-agent.html"><span>06</span>create_agent 到底创建了什么</a><a href="../chapters/07-stategraph.html"><span>07</span>StateGraph：状态、节点、边与 reducer</a><a href="../chapters/08-control-flow.html"><span>08</span>路由、循环与 Command</a><a href="../chapters/09-pregel.html"><span>09</span>Pregel：图在运行时如何前进</a><a href="../chapters/10-persistence.html"><span>10</span>检查点与 Store：两种记忆边界</a><a href="../chapters/11-interrupts.html"><span>11</span>中断、重放与人工审批</a><a href="../chapters/12-streaming.html"><span>12</span>流式输出不是一种流</a><a href="../chapters/13-subgraphs.html"><span>13</span>子图与多 Agent：先隔离上下文</a><a href="../chapters/14-project.html"><span>14</span>完整案例：观测申请的证据与审批</a><a href="../chapters/15-production.html"><span>15</span>生产检查表与源码阅读路线</a><a href="../chapters/16-deep-agents.html"><span>16</span>Deep Agents：create_agent 之上的 harness</a><a href="../chapters/17-multi-agent-mcp.html"><span>17</span>多 Agent 与 MCP：协作模式与工具互联</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语与 API 速查</a><a href="../chapters/appendix-sources.html"><span>B</span>来源、版本与原创性说明</a></nav>
+</dialog>
+<footer class="site-footer">基于官方源码快照独立撰写 · LangChain 1.4.2 · LangGraph 1.2.12</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

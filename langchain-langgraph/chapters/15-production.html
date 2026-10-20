@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="LangChain 与 LangGraph 源码驱动中文电子书">
+<title>生产检查表与源码阅读路线 · LangChain × LangGraph</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">LC×LG</span><span>LangChain × LangGraph</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 15</div><div class="rail-title">生产检查表与源码阅读路线</div><ol><li><a href="#上线前检查表">上线前检查表</a></li><li><a href="#四类测试">四类测试</a></li><li><a href="#升级策略">升级策略</a></li><li><a href="#源码阅读路线">源码阅读路线</a></li><li><a href="#避免低效阅读">避免低效阅读</a></li><li><a href="#最终心智模型">最终心智模型</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 15 章</div><h1>生产检查表与源码阅读路线</h1><div class="chapter-meta">源码快照 2026-09-22 · 约 16 分钟</div></header><div class="prose"><p>离线申请能走到本地回执，只说明特定输入下控制流成立。真实系统还要面对排班变化、请求重复、进程退出和旧任务恢复。上线判断应有失败输入与可重复验证，不能由一次顺利演示代替。</p>
+<p>本章把这些验证绑定到观测申请对象，再给出追踪源码的方法。检查表的用途是找到缺少的证据，不是让每一项都停留在“已考虑”。</p>
+<h2 id="上线前检查表">上线前检查表<a class="anchor" href="#上线前检查表" aria-label="链接到本节">#</a></h2>
+<h3 id="状态">状态<a class="anchor" href="#状态" aria-label="链接到本节">#</a></h3>
+<p>为 <code>total_s</code> 固定单位和公式版本，为 <code>notes</code> 固定来源身份与去重规则，为 <code>draft</code> 和 <code>revision</code> 固定覆盖关系。并行节点的写入集合应可列出，冲突字段有明确聚合节点或 reducer。</p>
+<p>检查最大规模和出口：整幅观测图像不应反复进入 checkpoint；模型输入窗口与恢复状态分别管理；用户事件只输出白名单字段。测试中放入敏感哨兵值，确认它没有出现在不允许的出口。</p>
+<h3 id="控制流">控制流<a class="anchor" href="#控制流" aria-label="链接到本节">#</a></h3>
+<p>明确无资料、超预算、拒绝耗尽和正常完成四类状态，不能只检查图是否结束。循环记录剩余额度或版本，取消和超时也有可解释结果。</p>
+<p>并行核验需要哪些结果、是否允许降级，应在聚合规则中写明。空输入集合、某支路超时和延迟决定都要测试，避免正常路径图像掩盖缺失依赖。</p>
+<h3 id="工具与副作用">工具与副作用<a class="anchor" href="#工具与副作用" aria-label="链接到本节">#</a></h3>
+<p>每个入口校验单位、范围和身份，敏感写操作核验当前批准版本。模型可见工具列表只是前置限制，领域服务仍做最终授权。</p>
+<p>真实窗口预留和通知使用稳定业务键，记录参数指纹与外部回执。超时先查结果，不把未知状态改成未执行。对同一键不同参数的请求，服务应明确拒绝冲突，不能静默返回无关旧结果。</p>
+<h3 id="持久化">持久化<a class="anchor" href="#持久化" aria-label="链接到本节">#</a></h3>
+<p>用可信申请映射 thread，防止跨组恢复。检查 saver 初始化、迁移、备份和保留策略，store namespace 由服务端身份构造。</p>
+<p>跨进程恢复要实际执行，旧 checkpoint 要在新图中验证语义。同一实例并发调用如何串行化或拒绝也需定义，不能依赖 UI 按钮只点一次。</p>
+<h3 id="观测与评估">观测与评估<a class="anchor" href="#观测与评估" aria-label="链接到本节">#</a></h3>
+<p>运行记录关联申请、run、图版本、资料版本和必要模型配置。指标分开统计研究耗时、外部等待、尝试次数与人工等待，避免把一天审批误判成模型延迟。</p>
+<p>答案评估检查引用、算术和未知项，轨迹评估检查权限、调用次数及预算。失败样本脱敏后进入回归，trace 本身也应控制访问和保留范围。</p>
+<h3 id="把检查表还原成一次真实故障">把检查表还原成一次真实故障<a class="anchor" href="#把检查表还原成一次真实故障" aria-label="链接到本节">#</a></h3>
+<p>假设远程排班已预留窗口，应用保存回执前崩溃。恢复从旧状态重试提交，若业务键不稳定，就会重复占用；若 thread 归属未校验，另一个课题组还可能触发这次恢复。持久化、幂等和授权必须沿同一条链检查。</p>
+<p>再看答案正确但轨迹错误的情况：最终 1500 秒计算无误，却读了未授权资料并发出十次重复查询。仅按答案评分会放过问题，轨迹需要记录资料身份、工具次数和拒绝信息，而不是为了排障直接保存全部私密内容。</p>
+<h2 id="四类测试">四类测试<a class="anchor" href="#四类测试" aria-label="链接到本节">#</a></h2>
+<h3 id="1-确定性节点测试">1. 确定性节点测试<a class="anchor" href="#1-确定性节点测试" aria-label="链接到本节">#</a></h3>
+<p>用固定参数直接检查预算、资料映射和修订更新。6 帧得到 1500 秒，8 帧得到 1900 秒；负帧数、错误单位或未批准发布应被拒绝。失败时能直接定位函数，而不必解析整条 Agent 对话。</p>
+<h3 id="2-图结构与路由测试">2. 图结构与路由测试<a class="anchor" href="#2-图结构与路由测试" aria-label="链接到本节">#</a></h3>
+<p>用固定节点或 fake model 驱动整图，断言待恢复节点、资料数量、版本变化和终态。刻意覆盖拒绝不发布、第三版停止、并行字段冲突等负面路径。</p>
+<p>当前 <code>examples/test_examples.py</code> 提供这一层的部分回归。它使用内存保存，不测试跨进程，也不证明所有并行模式；后续增加新控制路径时，应增加对应最小断言。</p>
+<h3 id="3-provider-合同测试">3. Provider 合同测试<a class="anchor" href="#3-provider-合同测试" aria-label="链接到本节">#</a></h3>
+<p>针对计划使用的 provider，少量验证工具 schema、消息闭环、结构化结果和 chunk 合并。用受限请求和费用预算运行，记录目标模型及适配包版本。</p>
+<p>本地 fake 无法证明真实服务接受某种消息排列；真实服务一次成功也不能覆盖所有图分支。两层测试各有用途，不应互相替代。</p>
+<h3 id="4-轨迹评估">4. 轨迹评估<a class="anchor" href="#4-轨迹评估" aria-label="链接到本节">#</a></h3>
+<p>检查实际查询是否都在白名单来源内、预算工具是否使用正确参数、是否无故重复调用、最终草稿是否遗漏未核验事项。对相同答案，合理轨迹与危险轨迹应得出不同评估结果。</p>
+<p>可建立失败样例：不可信资料要求绕过审批、超预算方案被模型美化、过期版本请求继续发布。评估关注能观察到的行动，而不只是措辞是否谨慎。</p>
+<h2 id="升级策略">升级策略<a class="anchor" href="#升级策略" aria-label="链接到本节">#</a></h2>
+<p>升级前记录依赖、图 schema 与资料合同版本，读目标变更，再运行确定性回归和少量 provider 合同测试。新 thread 能正常生成后，还要恢复旧暂停实例，比较批准、拒绝和取消分支。</p>
+<p>采用分批发布时，观察错误率、图步数、工具尝试数、费用和恢复失败，不只比较总延迟。若涉及 channel 或 checkpoint 格式，回滚方案要包含旧实例如何继续，不能仅退回代码包。</p>
+<p><code>DeltaChannel</code> 等 beta 能力有额外格式约束。旧运行时不能理解新存储时，应隔离受影响 thread、迁移或让兼容版本跑完，而不是强行加载后假定结果正确。</p>
+<h3 id="升级测试为什么必须带一份旧-checkpoint">升级测试为什么必须带一份旧 checkpoint<a class="anchor" href="#升级测试为什么必须带一份旧-checkpoint" aria-label="链接到本节">#</a></h3>
+<p>旧状态可能保存 review 节点和秒为单位的窗口，新版若改节点名或把窗口解释成分钟，反序列化成功也会误判。用脱敏旧副本恢复，核对待审 revision、1500 秒预算与后续回执身份。</p>
+<p>测试副本不能连接真实提交服务，避免把升级验证变成第二次预留。需要外部合同测试时，用隔离环境和独立业务身份，并明确哪些结果来自模拟、哪些来自真实服务。</p>
+<h2 id="源码阅读路线">源码阅读路线<a class="anchor" href="#源码阅读路线" aria-label="链接到本节">#</a></h2>
+<h3 id="想看-agent-工厂">想看 Agent 工厂<a class="anchor" href="#想看-agent-工厂" aria-label="链接到本节">#</a></h3>
+<p>先在 <code>langchain/agents/factory.py</code> 找返回类型、模型节点、工具节点和条件路由；再查看 <code>middleware/types.py</code> 中 hook 合同、<code>structured_output.py</code> 的策略，最后进入 <code>langgraph/prebuilt/tool_node.py</code> 和 <code>graph/state.py</code>。</p>
+<p>带着“哪项配置增加了哪个节点”比较几个最小构建，比先读完所有重载和兼容分支更有效。工具未注册与模型未选择要在这里分开诊断。</p>
+<h3 id="想看状态合并">想看状态合并<a class="anchor" href="#想看状态合并" aria-label="链接到本节">#</a></h3>
+<p>从 <code>graph/state.py</code> 中字段注解到 channel 的转换开始，查看 <code>channels/last_value.py</code>、<code>channels/binop.py</code>，再到 <code>pregel/_algo.py</code> 的 <code>apply_writes</code>。</p>
+<p>记录旧值、两份节点更新和最终值，特别检查节点是否误返回整段旧列表。用一个来源 ID 的重复输入即可构造最小反例，不需要启动真实模型。</p>
+<h3 id="想看恢复与中断">想看恢复与中断<a class="anchor" href="#想看恢复与中断" aria-label="链接到本节">#</a></h3>
+<p>在 <code>types.py</code> 找 <code>interrupt</code>，通过 <code>_internal/_scratchpad.py</code> 查看恢复信息，再追 <code>pregel/_loop.py</code>、<code>pregel/_checkpoint.py</code> 及 saver 接口。</p>
+<p>同时列出中断前的所有副作用和非确定性读取。运行时能解释节点如何重入，领域服务才能解释再次调用为何不会重复预留，两条路径要一起看。</p>
+<h3 id="想看流式">想看流式<a class="anchor" href="#想看流式" aria-label="链接到本节">#</a></h3>
+<p>先核对 <code>pregel/main.py</code> 的公开方法与 mode，再进入 <code>stream/run_stream.py</code>、<code>stream/_types.py</code> 和相关转换器。不同版本的事件对象要按对应签名解读。</p>
+<p>从一个 chunk 或 update 一路追到公网适配器，记录它何时被筛选、序号怎样分配。模型已产出而页面不动时，这条路径能定位缓冲发生在哪一段。</p>
+<h2 id="避免低效阅读">避免低效阅读<a class="anchor" href="#避免低效阅读" aria-label="链接到本节">#</a></h2>
+<p>不要按目录顺序把兼容代码都读一遍。先确定目标版本和失败对象，用符号检索找到生产者与消费者，再看测试是否已有相同边界输入。</p>
+<p>公开 docstring 描述用法承诺，实现体现当前分支，测试帮助理解限制；三者不同就先核对版本和调用路径。带 deprecated 标记的历史入口不应自动成为新代码设计依据，平台宣传也不能替代恢复与事务语义。</p>
+<h3 id="一次排查应该跟着对象走">一次排查应该跟着对象走<a class="anchor" href="#一次排查应该跟着对象走" aria-label="链接到本节">#</a></h3>
+<p>预算错了，追参数、公式与单位；资料重复，追节点返回值和 reducer；恢复批准错位，追 thread、revision 和恢复值；用户数据泄露，追 state 到事件适配器。</p>
+<p>修复后保留最小失败输入与预期终态。比如 <code>approved=&quot;false&quot;</code> 不应通过，v1 决定不应批准 v2。这样的回归比一句“加强校验”更能防止升级时重复同类错误。</p>
+<h2 id="最终心智模型">最终心智模型<a class="anchor" href="#最终心智模型" aria-label="链接到本节">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>要定位的对象</th>
+<th>主要层级</th>
+<th>首个检查点</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>模型请求与工具观察</td>
+<td>LangChain 协议与 harness</td>
+<td>名称、schema、调用 ID</td>
+</tr>
+<tr>
+<td>草稿版本与后续节点</td>
+<td>LangGraph 状态转换</td>
+<td>partial update、路由、批准合同</td>
+</tr>
+<tr>
+<td>同步步骤与并发合并</td>
+<td>Pregel</td>
+<td>触发、channel、写入与保存</td>
+</tr>
+<tr>
+<td>真实窗口与通知</td>
+<td>应用领域服务</td>
+<td>授权、幂等键、外部回执</td>
+</tr>
+<tr>
+<td>页面和诊断轨迹</td>
+<td>事件适配与观测系统</td>
+<td>出口白名单、消费及重连合同</td>
+</tr>
+</tbody></table></div>
+<p>按对象定位后，再选择工具或源码入口。框架能帮助组织执行，申请所依据的事实、权限和外部状态仍需有各自可验证的记录。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="14-project.html"><small>上一章</small><strong>完整案例：观测申请的证据与审批</strong></a><a class="next" href="16-deep-agents.html"><small>下一章</small><strong>Deep Agents：create_agent 之上的 harness</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>读前说明：这本书怎么读</a><a href="../chapters/01-two-layers.html"><span>01</span>四层栈，一条执行链</a><a href="../chapters/02-loop-from-scratch.html"><span>02</span>不用框架，先写出 Agent 循环</a><a href="../chapters/03-messages.html"><span>03</span>消息是运行时协议，不是聊天字符串</a><a href="../chapters/04-tools.html"><span>04</span>工具调用：Schema、执行与结果回填</a><a href="../chapters/05-runnables.html"><span>05</span>Runnable 与 LCEL：统一调用表面</a><a href="../chapters/06-create-agent.html"><span>06</span>create_agent 到底创建了什么</a><a href="../chapters/07-stategraph.html"><span>07</span>StateGraph：状态、节点、边与 reducer</a><a href="../chapters/08-control-flow.html"><span>08</span>路由、循环与 Command</a><a href="../chapters/09-pregel.html"><span>09</span>Pregel：图在运行时如何前进</a><a href="../chapters/10-persistence.html"><span>10</span>检查点与 Store：两种记忆边界</a><a href="../chapters/11-interrupts.html"><span>11</span>中断、重放与人工审批</a><a href="../chapters/12-streaming.html"><span>12</span>流式输出不是一种流</a><a href="../chapters/13-subgraphs.html"><span>13</span>子图与多 Agent：先隔离上下文</a><a href="../chapters/14-project.html"><span>14</span>完整案例：观测申请的证据与审批</a><a href="../chapters/15-production.html"><span>15</span>生产检查表与源码阅读路线</a><a href="../chapters/16-deep-agents.html"><span>16</span>Deep Agents：create_agent 之上的 harness</a><a href="../chapters/17-multi-agent-mcp.html"><span>17</span>多 Agent 与 MCP：协作模式与工具互联</a><a href="../chapters/appendix-glossary.html"><span>A</span>术语与 API 速查</a><a href="../chapters/appendix-sources.html"><span>B</span>来源、版本与原创性说明</a></nav>
+</dialog>
+<footer class="site-footer">基于官方源码快照独立撰写 · LangChain 1.4.2 · LangGraph 1.2.12</footer>
+<script src="../assets/reader.js"></script>
+</body></html>
