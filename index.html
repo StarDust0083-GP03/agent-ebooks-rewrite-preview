@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Agent 电子书重构预览</title>
-<meta name="description" content="四本 Agent 主题中文电子书的 rewrite/agent-ebooks 分支预览。">
+<title>Agent 电子书与 Code Mode 预览</title>
+<meta name="description" content="四本 Agent 主题中文书的 rewrite/agent-ebooks 分支，以及 Pi Code Mode 架构电子书。">
 <style>
 :root{--paper:#f5f4ed;--panel:#faf9f5;--ink:#20201d;--muted:#6b6a64;--line:#dedbd0;--brand:#1B365D}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.85 "Noto Serif CJK SC",Charter,Georgia,serif}
@@ -9,9 +9,10 @@
 header{border-bottom:1px dotted var(--line);padding-bottom:30px;margin-bottom:30px}
 .eyebrow{font:12px/1.5 "Noto Sans CJK SC",sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--brand)}
 h1{font-weight:500;font-size:43px;line-height:1.3;letter-spacing:-.03em;margin:12px 0 14px}
-.lead{color:var(--muted);max-width:730px;margin:0}.meta{font:13px/1.8 "Noto Sans CJK SC",sans-serif;color:var(--muted);margin-top:16px}
+.lead{color:var(--muted);max-width:760px;margin:0}.meta{font:13px/1.8 "Noto Sans CJK SC",sans-serif;color:var(--muted);margin-top:16px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:26px 26px 22px;break-inside:avoid}
+.card.featured{grid-column:1/-1;border-color:var(--brand);background:linear-gradient(135deg,#faf9f5 0%,#eef2f7 100%)}
 .card-top{display:flex;align-items:center;gap:12px;margin-bottom:12px}.num{font:12px monospace;color:var(--brand);border:1px solid var(--line);border-radius:4px;padding:2px 7px}
 .kicker{font:12px "Noto Sans CJK SC",sans-serif;color:var(--muted);letter-spacing:.04em}
 h2{font-weight:500;font-size:23px;line-height:1.45;margin:0 0 8px}.card p{margin:0 0 12px;color:#3d3d3a;font-size:16px;line-height:1.8}
@@ -21,13 +22,13 @@ h2{font-weight:500;font-size:23px;line-height:1.45;margin:0 0 8px}.card p{margin
 .actions a.primary{background:var(--brand);border-color:var(--brand);color:#fff}
 .note{margin-top:34px;padding:18px 20px;border-left:3px solid var(--brand);background:var(--panel);font-size:14px;color:var(--muted);line-height:1.9}
 footer{margin-top:44px;border-top:1px dotted var(--line);padding-top:18px;font-size:13px;color:var(--muted)}
-@media(max-width:720px){.wrap{padding:34px 18px 55px}h1{font-size:32px}.grid{grid-template-columns:1fr}}
-@media print{.actions{display:none}.grid{grid-template-columns:1fr 1fr}body{background:#fff}}
+@media(max-width:720px){.wrap{padding:34px 18px 55px}h1{font-size:32px}.grid{grid-template-columns:1fr}.card.featured{grid-column:auto}}
+@media print{.actions{display:none}.grid{grid-template-columns:1fr 1fr}.card.featured{grid-column:1/-1}body{background:#fff}}
 </style></head><body><div class="wrap">
-<header><div class="eyebrow">Preview · rewrite/agent-ebooks</div>
-<h1>Agent 电子书重构预览</h1>
-<p class="lead">四本中文电子书的重写分支集中部署。与各个仓库当前正式 Pages 分开，便于逐本比较新版正文、图解和阅读器。</p>
-<p class="meta">分支 <code>rewrite/agent-ebooks</code> · 构建于 2026-10-20 · 入口为分章目录；AI 工程师、AI Infra 与 LangGraph 另提供单页离线合订本</p></header>
+<header><div class="eyebrow">Preview · rewrite/agent-ebooks + Code Mode</div>
+<h1>Agent 电子书与 Code Mode 预览</h1>
+<p class="lead">四本中文书的重写分支，加上 Pi 架构演进电子书。集中部署，与各仓库当前正式 Pages 分开，便于逐本比较正文、图解和阅读器。</p>
+<p class="meta">重写分支 <code>rewrite/agent-ebooks</code> · Code Mode 书对应 Pi <code>v1.3.0</code> · 构建于 2026-10-20</p></header>
 <main class="grid"><article class="card">
   <div class="card-top"><span class="num">01</span><span class="kicker">阅读版 2.0</span></div>
   <h2>AI 工程师：从原理到实践</h2>
@@ -36,7 +37,7 @@ footer{margin-top:44px;border-top:1px dotted var(--line);padding-top:18px;font-s
   <div class="actions">
     <a class="primary" href="ai-engineer/index.html">开始阅读</a>
     <a href="ai-engineer/book.html">离线合订本</a>
-    <a href="https://github.com/StarDust0083-GP03/AI-Engineer-from-scrach/tree/rewrite/agent-ebooks">分支源码</a>
+    <a href="https://github.com/StarDust0083-GP03/AI-Engineer-from-scrach/tree/rewrite/agent-ebooks">源码</a>
   </div>
 </article><article class="card">
   <div class="card-top"><span class="num">02</span><span class="kicker">17 章 + 前言与附录</span></div>
@@ -46,7 +47,7 @@ footer{margin-top:44px;border-top:1px dotted var(--line);padding-top:18px;font-s
   <div class="actions">
     <a class="primary" href="agent-memory/index.html">开始阅读</a>
     <a href="agent-memory/search.html">全文搜索</a>
-    <a href="https://github.com/StarDust0083-GP03/agent-memory-from-scratch/tree/rewrite/agent-ebooks">分支源码</a>
+    <a href="https://github.com/StarDust0083-GP03/agent-memory-from-scratch/tree/rewrite/agent-ebooks">源码</a>
   </div>
 </article><article class="card">
   <div class="card-top"><span class="num">03</span><span class="kicker">20 章 + 2 附录</span></div>
@@ -56,7 +57,7 @@ footer{margin-top:44px;border-top:1px dotted var(--line);padding-top:18px;font-s
   <div class="actions">
     <a class="primary" href="ai-infra/index.html">开始阅读</a>
     <a href="ai-infra/book.html">离线合订本</a>
-    <a href="https://github.com/StarDust0083-GP03/ai-infra-from-scratch/tree/rewrite/agent-ebooks">分支源码</a>
+    <a href="https://github.com/StarDust0083-GP03/ai-infra-from-scratch/tree/rewrite/agent-ebooks">源码</a>
   </div>
 </article><article class="card">
   <div class="card-top"><span class="num">04</span><span class="kicker">18 章 + 2 附录</span></div>
@@ -66,9 +67,19 @@ footer{margin-top:44px;border-top:1px dotted var(--line);padding-top:18px;font-s
   <div class="actions">
     <a class="primary" href="langchain-langgraph/index.html">开始阅读</a>
     <a href="langchain-langgraph/book.html">离线合订本</a>
-    <a href="https://github.com/StarDust0083-GP03/langchain-langgraph-from-scratch/tree/rewrite/agent-ebooks">分支源码</a>
+    <a href="https://github.com/StarDust0083-GP03/langchain-langgraph-from-scratch/tree/rewrite/agent-ebooks">源码</a>
+  </div>
+</article><article class="card featured">
+  <div class="card-top"><span class="num">05</span><span class="kicker">12 章 · 12 张架构图</span></div>
+  <h2>Pi：从工具循环到 Code Mode</h2>
+  <p>比较 v0.9.4、v0.99.2 与 v1.3.0，拆开 Code Mode、工具发现、MCP、沙箱边界、Durable 重放和迁移路线。</p>
+  <p class="commit"><code>410bf39</code> · v1.3.0</p>
+  <div class="actions">
+    <a class="primary" href="pi-code-mode/index.html">开始阅读</a>
+    <a href="pi-code-mode/pi-architecture.zh-CN.pdf">PDF</a><a href="pi-code-mode/pi-architecture.zh-CN.epub">EPUB</a><a href="pi-code-mode/book.zh-CN.md">Markdown</a>
+    <a href="https://github.com/StarDust0083-GP03/pi-mono-architecture-book">源码</a>
   </div>
 </article></main>
-<div class="note">这是重构分支的静态预览，不覆盖各仓库 <code>main</code> 的现有发布。AI 工程师阅读本中的 163 个仓库根目录素材链接已改写到该分支的 GitHub 源码；其余三本保留构建器生成的站内链接与上游固定提交链接。</div>
+<div class="note">这是预览站，不覆盖各仓库 <code>main</code> 的现有发布。AI 工程师阅读本中的 163 个仓库根目录素材链接已改写到该分支的 GitHub 源码；其余三本保留构建器生成的站内链接与上游固定提交链接。Pi 书可直接阅读网页、PDF 或 EPUB。</div>
 <footer>由本地构建产物生成 · 不包含第三方源码克隆、论文归档或依赖缓存</footer>
 </div></body></html>
