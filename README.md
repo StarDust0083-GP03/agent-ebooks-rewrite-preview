@@ -19,7 +19,7 @@
 
 - 本地服务器检查 263 个内部 URL，0 个 404 或缺失锚点。
 - 桌面和移动布局检查；五本目录页、三个合订本、搜索页与 Pi 的 PDF/EPUB 可打开。
-- 四套书均已重新构建，新增 16 幅正文内嵌图解：AI Engineer 3 幅、Agent Memory 2 幅、AI Infra 4 幅、LangChain / LangGraph 7 幅。Pi 书沿用原产物。
+- 四套书均已重新构建，新增 16 幅正文内嵌图解：AI Engineer 3 幅、Agent Memory 2 幅、AI Infra 4 幅、LangChain / LangGraph 7 幅。Pi 书更新至 v1.4.0，包含 12 章、12 张架构图、29 条固定来源与 49 页 PDF。
 - 修复 AI Infra 与 LangChain / LangGraph 合订本的重复锚点，补充内嵌 SVG 无障碍引用校验。
 - 四套阅读产物校验通过；Agent Memory 的 24 项示例测试、AI Infra 离线检查及标准库 Agent 示例通过。
 - LangGraph 审批示例测试因当前 Python 缺少 `langgraph` 而受阻，未执行真实模型、MCP、GPU 或持久数据库集成测试。

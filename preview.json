@@ -5,9 +5,9 @@
     "agent-memory": "eb1d57b 2026-10-23 docs(ebook): add illustrated examples and validate reading artifacts",
     "ai-infra": "e552766 2026-10-23 docs(ebook): add illustrated examples and validate reading artifacts",
     "langchain-langgraph": "9e35d4d 2026-10-23 docs(ebook): add illustrated examples and validate reading artifacts",
-    "pi-code-mode": "410bf39 2026-10-20 docs: publish Pi architecture ebook v1.3.0"
+    "pi-code-mode": "46a4ad9 2026-10-23 docs(book): update Pi architecture guide to v1.4.0"
   },
-  "built_at": "2026-10-23T02:05:32.683593+00:00",
+  "built_at": "2026-10-23T02:43:08.753668+00:00",
   "new_illustrations": {
     "ai-engineer": 3,
     "agent-memory": 2,
