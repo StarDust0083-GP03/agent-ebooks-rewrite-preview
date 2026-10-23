@@ -1,10 +1,17 @@
 {
   "branch": "rewrite/agent-ebooks",
   "commits": {
-    "ai-engineer": "439d3f3 2026-10-20 docs(ebook): add rewritten AI engineer reading edition",
-    "agent-memory": "158415b 2026-10-20 docs(ebook): rewrite chapters, illustrations, and examples",
-    "ai-infra": "7c9d15f 2026-10-20 docs(ebook): rewrite chapters, illustrations, and examples",
-    "langchain-langgraph": "d79497c 2026-10-20 docs(ebook): rewrite chapters, illustrations, and examples",
+    "ai-engineer": "157417a 2026-10-23 docs(ebook): add illustrated examples and validate reading artifacts",
+    "agent-memory": "eb1d57b 2026-10-23 docs(ebook): add illustrated examples and validate reading artifacts",
+    "ai-infra": "e552766 2026-10-23 docs(ebook): add illustrated examples and validate reading artifacts",
+    "langchain-langgraph": "9e35d4d 2026-10-23 docs(ebook): add illustrated examples and validate reading artifacts",
     "pi-code-mode": "410bf39 2026-10-20 docs: publish Pi architecture ebook v1.3.0"
+  },
+  "built_at": "2026-10-23T02:05:32.683593+00:00",
+  "new_illustrations": {
+    "ai-engineer": 3,
+    "agent-memory": 2,
+    "ai-infra": 4,
+    "langchain-langgraph": 7
   }
 }
