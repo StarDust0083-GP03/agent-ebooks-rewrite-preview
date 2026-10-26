@@ -1,0 +1,24 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>层次索引与记忆：问题开始面向整份资料 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="11-hierarchy-memory"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#摘要层与明细层分别做什么">摘要层与明细层分别做什么</a></li><li><a href="#raptor-将摘要递归组织成树">RAPTOR 将摘要递归组织成树</a></li><li><a href="#memorag-用全局记忆提供检索线索">MemoRAG 用全局记忆提供检索线索</a></li><li><a href="#几类容易隐藏的错误">几类容易隐藏的错误</a></li><li><a href="#什么时候值得引入这一层">什么时候值得引入这一层</a></li><li><a href="#对应资料">对应资料</a></li></ol></details><article class="content"><h1 id="层次索引与记忆-问题开始面向整份资料">层次索引与记忆：问题开始面向整份资料</h1><p>“回调的幂等键是什么”可以定位一个片段；“支付文档里主要有哪些一致性风险”则跨越回调、退款和对账。把问题分别交给几个小块，可能得到若干局部答案，缺少整体组织。</p>
+<h2 id="摘要层与明细层分别做什么">摘要层与明细层分别做什么</h2><p>层次索引在原文块上增加摘要入口。用户问整体主题时先找到相关文档或章节，再下钻明细；用户问精确字段时可以直接检索底层块。关键是摘要保存到子块的映射，而不只是多放一段自然语言。</p>
+<pre tabindex="0"><code class="hljs">支付资料摘要
+├─ 回调：认证与重复事件 → callback-v2:0、callback-v2:1
+├─ 退款：超时与重试     → refund-v2:0、refund-v2:1
+└─ 对账：状态与金额差异 → reconcile-v1:0</code></pre><p>摘要可以帮助导航，但若回答涉及“先做什么、哪些条件”，仍应展开原文核对。摘要删掉一个否定，后面的检索器未必会察觉。</p>
+<h2 id="raptor-将摘要递归组织成树">RAPTOR 将摘要递归组织成树</h2><p>RAPTOR 通过表示、聚类和摘要，递归构建不同抽象层级。查询可以在树上找到概括或细节，从而支持跨长文档的信息组织。它与简单的“每篇文档写一段摘要”相比，多了递归层次和相应的检索选择。</p>
+<p>代价不仅是首次生成摘要。底层规则变更时，受影响的父节点也需要刷新；聚类变化还可能改变整棵树的组织。保存父子关系、生成配置和版本，是让派生结构可以重建的前提。</p>
+<p>本书只依据上游入口和论文摘要解释机制，没有复现其聚类参数或论文结果。不能把该方法在其他题集的增益当成支付资料的预期收益。</p>
+<h2 id="memorag-用全局记忆提供检索线索">MemoRAG 用全局记忆提供检索线索</h2><p>MemoRAG 针对显式查询和良好结构不足的长上下文问题，通过全局记忆产生线索，再回到原文检索，最后生成回答。这里的记忆承担发现线索的工作，不应该替代原文成为不可核对的事实库。</p>
+<p>上游教程使用模型提取主题与细节键值对，再生成线索文本、代理问题，做多查询检索。这是简化演示。原论文的记忆模块涉及 KV 压缩等设计，不能将主题 JSON 称为已经实现原论文的模型缓存。</p>
+<p>“KV”在数据库键值记录和模型注意力缓存中指代不同对象。看到相同缩写时，要确认具体保存了什么、谁读取、数据如何更新。</p>
+<h2 id="几类容易隐藏的错误">几类容易隐藏的错误</h2><p>不同段落都谈“退款失败”，主题去重时可能只保留先出现的一条，丢掉渠道差异。旧记忆生成了错误代理问题，即使原文已修正，检索还可能沿着旧线索走。摘要来自包含私人资料的全集，也不能直接以公共权限对所有人展示。</p>
+<p>对于受限资料，摘要、索引和代理查询都要继承适当的范围。把原文藏起来却公开摘要，并没有完成访问控制。多文档摘要尤其需要防止将不同范围混合成一个无法分权的对象。</p>
+<h2 id="什么时候值得引入这一层">什么时候值得引入这一层</h2><p>如果失败样本主要是精确术语找不到，先改查询或召回。若用户经常问跨章节主题、整份报告脉络，而且平面检索确实缺失整体信息，再比较层次索引。文档很少时，也可以先直接读取授权全文，作为质量与费用的对照路线。</p>
+<p>不要只拿最强的层次方案与故意调差的基础检索比较。基线应包含合理 top-k、重排和上下文预算，并在同一数据版本上测试。</p>
+<h2 id="对应资料">对应资料</h2><ul>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/hierarchical_indices.ipynb">Hierarchical Indices</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/raptor.ipynb">RAPTOR 教程</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/memorag.ipynb">MemoRAG 教程</a></li>
+<li><a href="https://arxiv.org/abs/2401.18059">RAPTOR 论文</a></li>
+<li><a href="https://arxiv.org/abs/2409.05591">MemoRAG 论文</a></li>
+</ul>
+</article><nav class="pager" aria-label="篇章导航"><a href="10-corrective.html"><small>上一篇</small>纠错检索：找不到以后，系统走哪一条路</a><a href="12-graph.html"><small>下一篇</small>图谱检索：从模块一路找到负责人</a></nav></main><script src="../assets/wiki.js"></script></body></html>

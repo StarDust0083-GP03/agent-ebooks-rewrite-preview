@@ -235,6 +235,137 @@ sup{font-size:.7em;line-height:0;vertical-align:super}
 .diagram-steps li,.diagram-options dd{font-size:10pt}
 .chapter-map span{font-size:10pt}
 }
+
+/* ebook-reader-polish v1 */
+:root{--eb-light-accent:#1b365d;--eb-dark-accent:#a6bfdf}
+/* Shared reading refinements. Embedded in each book so offline copies stay portable. */
+@media screen {
+  :root {
+    --eb-accent:var(--forest,var(--accent,var(--brand,#1b365d)));
+    --eb-line:var(--line,var(--rule,#d8d5c9));
+    --eb-panel:var(--paper-2,var(--paper-deep,var(--panel,#eeece2)));
+  }
+  html {scroll-padding-top:88px;scrollbar-color:var(--eb-line) var(--paper);scrollbar-width:thin}
+  :root[data-theme="light"] {color-scheme:light;--paper:#faf8f2;--paper-2:#f0ece2;--paper-deep:#f0ece2;--panel:#f0ece2;--ink:#262b27;--muted:#5d665e;--line:#d4d8ce;--rule:#d4d8ce;--code:#f0ece2;--code-ink:#283b33;--forest:var(--eb-light-accent,#29564c);--accent:var(--eb-light-accent,#29564c);--brand:var(--eb-light-accent,#29564c)}
+  :root[data-theme="dark"] {color-scheme:dark;--paper:#171d19;--paper-2:#222b24;--paper-deep:#222b24;--panel:#222b24;--ink:#e3e7de;--muted:#b0bbad;--line:#455044;--rule:#455044;--code:#202a24;--code-ink:#e3e7de;--forest:var(--eb-dark-accent,#9bc8b3);--accent:var(--eb-dark-accent,#9bc8b3);--brand:var(--eb-dark-accent,#9bc8b3)}
+  @media(prefers-color-scheme:dark) {:root:not([data-theme="light"]):not([data-theme="dark"]){color-scheme:dark;--paper:#171d19;--paper-2:#222b24;--paper-deep:#222b24;--panel:#222b24;--ink:#e3e7de;--muted:#b0bbad;--line:#455044;--rule:#455044;--code:#202a24;--code-ink:#e3e7de;--forest:var(--eb-dark-accent,#9bc8b3);--accent:var(--eb-dark-accent,#9bc8b3);--brand:var(--eb-dark-accent,#9bc8b3)}}
+  body {font-variant-numeric:tabular-nums;overflow-wrap:break-word}
+  .layout code,.layout pre {background:var(--eb-panel);color:var(--ink)}
+  .layout th {background:var(--eb-panel)}
+  .layout blockquote {border-left-width:1px}
+  .reading .lesson-note,.reading .book-diagram {background:var(--eb-panel)}
+  ::selection {background:color-mix(in srgb,var(--eb-accent) 22%,var(--paper));color:var(--ink)}
+  input {caret-color:var(--eb-accent)}
+  h1,h2,h3,h4 {text-wrap:balance;letter-spacing:0}
+  p,li {text-wrap:pretty}
+  .kicker,.eyebrow {display:none}
+  .topbar {background:var(--paper);backdrop-filter:none;min-height:64px;height:auto;gap:12px}
+  .brand {letter-spacing:0;min-width:0}
+  .brand-mark {transform:none;border:0;font-size:14px;font-weight:600;white-space:nowrap;min-width:44px;width:auto}
+  .hero {padding-top:64px;padding-bottom:48px;gap:56px}
+  .hero h1 {font-size:clamp(36px,4.5vw,58px);line-height:1.25;letter-spacing:0}
+  .hero .dek {font-size:21px;line-height:1.8;margin-top:22px;max-width:34em}
+  .hero-aside {font-size:14px;line-height:1.8;border-left:1px solid var(--eb-line)}
+  .home-grid {padding-top:42px}
+  .home-intro {font-size:15px;line-height:1.8}
+  .chapter-row {gap:18px;padding:21px 4px;transition:background-color 120ms ease-out}
+  .chapter-row h3 {font-size:22px;line-height:1.5;letter-spacing:0}
+  .chapter-row p {font-size:14px;line-height:1.7;margin-top:6px}
+  .chapter-row:focus-visible {outline-offset:-2px}
+  .reader-layout {grid-template-columns:220px minmax(0,780px);gap:64px;padding-top:44px}
+  .chapter-rail {font-size:14px;line-height:1.65;top:96px;max-height:calc(100dvh - 120px)}
+  .rail-label {letter-spacing:.03em}
+  .rail-title {font-size:17px;line-height:1.65}
+  .chapter-rail li a {padding:11px 4px}
+  .chapter-rail a[aria-current="location"],nav.toc>a[aria-current="location"] {color:var(--eb-accent);font-weight:600;text-decoration:underline;text-underline-offset:5px}
+  .chapter-head {padding-bottom:28px;margin-bottom:32px}
+  .chapter-head h1 {font-size:clamp(32px,3.6vw,46px);line-height:1.4;letter-spacing:0}
+  .chapter-meta {font-size:14px;line-height:1.8}
+  .chapter-number {letter-spacing:.02em}
+  .prose,.content,.reading {line-height:1.9;letter-spacing:0}
+  .prose>p:first-of-type {font-size:inherit;line-height:inherit}
+  .prose p,.content p,.reading p {margin-bottom:1.25em}
+  .prose h2,.content h2,.reading h2 {font-size:1.45em;line-height:1.5;letter-spacing:0;margin-top:2.1em;margin-bottom:.7em;border-left:0;padding-left:0}
+  .prose h3,.content h3,.reading h3 {font-size:1.15em;line-height:1.6}
+  .prose blockquote,.reading blockquote {font-style:normal;border-left-width:1px}
+  .anchor {opacity:.55;padding:4px}
+  .table-wrap {max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;margin:1.7em 0}
+  .table-wrap table {min-width:560px;font-size:15px;line-height:1.75;table-layout:auto}
+  .table-wrap:focus-visible,pre:focus-visible {outline:2px solid var(--eb-accent);outline-offset:4px}
+  pre {max-width:100%;tab-size:4;overscroll-behavior-inline:contain;scrollbar-width:thin;box-shadow:none}
+  .prose pre,.content pre {padding:40px 22px 22px}
+  .prose pre code,.content pre code {font-size:14px;line-height:1.8}
+  .copy {min-height:32px;min-width:52px;top:5px;right:8px;font-size:12px;border-color:color-mix(in srgb,var(--code-ink,var(--ink)) 35%,transparent);background:var(--code);color:var(--code-ink,var(--ink))}
+  .book {width:min(100% - 48px,780px);padding-top:46px}
+  .home-title {font-size:clamp(34px,4.5vw,52px);line-height:1.3;letter-spacing:0}
+  .content h1 {font-size:clamp(30px,3.5vw,42px);line-height:1.45}
+  .deck {line-height:1.85}
+  .resume {box-shadow:none;border-block:1px solid var(--eb-line);padding:20px 0;background:transparent}
+  .toolbar {display:none}
+  .control,.tool-button {min-height:44px;min-width:44px;font-size:14px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+  [data-reader-theme] {appearance:none;background:transparent;border:1px solid var(--eb-line);color:var(--muted);border-radius:3px;padding:8px 10px;cursor:pointer;font:14px/1.6 var(--sans,"Noto Sans CJK SC",sans-serif)}
+  button,a,input,summary {touch-action:manipulation}
+  a:focus-visible,button:focus-visible,summary:focus-visible,input:focus-visible {outline:2px solid var(--eb-accent);outline-offset:3px}
+  .search-input {font-size:20px;min-height:52px;border-radius:2px}
+  .search-page h1 {font-size:clamp(32px,4vw,48px);line-height:1.4;letter-spacing:0}
+  .search-hit h2 {line-height:1.6}
+  .reader-book-toc {position:sticky;top:28px;align-self:start;max-height:calc(100dvh - 60px);overflow:auto}
+  .reader-book-toc>summary {display:none}
+  .reader-book-toc nav.toc {position:static;max-height:none}
+  .reader-mobile-toc {display:none}
+  .reader-mobile-toc summary {min-height:48px;cursor:pointer;display:flex;align-items:center;font:500 15px/1.7 "Noto Sans CJK SC",sans-serif}
+  .reader-mobile-toc ol {margin:0 0 18px;padding-left:22px;font:15px/1.8 "Noto Sans CJK SC",sans-serif}
+  .reader-mobile-toc a {display:block;padding:8px 0;text-decoration:none}
+  .cover {padding-top:58px;padding-bottom:46px}
+  .cover h1 {font-size:clamp(36px,4.5vw,58px);line-height:1.3;letter-spacing:0}
+  .cover .intro {line-height:1.85}
+  .layout {grid-template-columns:225px minmax(0,780px);gap:52px;max-width:1180px}
+  .layout>main {max-width:780px}
+  .layout h1#cover {font-size:44px;line-height:1.4;letter-spacing:0}
+  .layout h1 {line-height:1.5;letter-spacing:0}
+  .layout h2 {border-left:0;padding-left:0;margin-top:2em}
+  nav.toc>a {padding:10px 4px}
+  .tools a,.tools button {min-height:44px;display:inline-flex;align-items:center;justify-content:center}
+  .volume {display:block;max-width:880px}
+  @media(max-width:1000px) {
+    .reader-layout {display:block;max-width:828px;padding-inline:24px}
+    .chapter-rail {display:none}
+    .reader-book-toc {position:static;max-height:none;margin-bottom:30px;border-bottom:1px solid var(--eb-line)}
+    .reader-book-toc>summary {display:flex;align-items:center;min-height:48px;cursor:pointer;font:500 16px/1.7 sans-serif}
+    .reader-mobile-toc {display:block;border-block:1px solid var(--eb-line);margin:0 0 32px}
+    .layout {display:block;padding:28px 24px 80px}
+    nav.toc {columns:2;position:static;max-height:none}
+  }
+  @media(max-width:700px) {
+    .topbar {padding:8px 14px;gap:6px;flex-wrap:wrap}
+    .brand {font-size:14px;line-height:1.6;max-width:100%;overflow-wrap:anywhere}
+    .brand span:last-child {display:none}
+    .topbar .tools {margin-left:auto;gap:0}
+    .topbar .spacer {min-width:0}
+    .hero {display:block;padding:38px 20px 34px}
+    .hero h1 {font-size:36px;line-height:1.4}
+    .hero .dek {font-size:19px;line-height:1.9}
+    .hero-aside {margin-top:28px;border-left:0;border-top:1px solid var(--eb-line);padding:20px 0 0}
+    .home-grid {display:block;padding:30px 20px 70px}
+    .home-intro {position:static;margin-bottom:28px}
+    .chapter-row h3 {font-size:20px}
+    .reader-layout {padding:30px 20px 80px}
+    .chapter-head h1 {font-size:32px}
+    .prose,.content,.reading {line-height:1.9}
+    .prose pre {margin-inline:0;padding-inline:16px}
+    .book {width:calc(100% - 40px);padding-top:32px}
+    .home-title,.content h1 {font-size:32px;line-height:1.4}
+    .topbar .brand {max-width:calc(100% - 150px);white-space:normal}
+    .reader-tools {flex-wrap:wrap}
+    .bar-inner {gap:8px;flex-wrap:wrap}
+    .layout h1#cover {font-size:34px}
+    nav.toc {columns:1}
+    .search-page {padding-top:36px}
+    .chapter-nav {margin-top:44px}
+  }
+  @media(prefers-reduced-motion:reduce) {html{scroll-behavior:auto}.chapter-row,.control{transition:none}}
+}
+@media print {.reader-mobile-toc,.reader-book-toc,[data-reader-theme],.copy{display:none!important}}
 </style></head><body><a class="skip" href="#main">跳到正文</a><header class="bar"><div class="bar-inner"><a class="brand" href="#book-contents">AI 工程师 / 合订本</a><div class="reader-tools" role="group" aria-label="阅读设置"><a href="#book-search" aria-label="搜索全书">搜索</a><button data-size="-2" aria-label="减小字号">A−</button><span id="font-value" aria-live="polite">20px</span><button data-size="2" aria-label="增大字号">A＋</button><button class="print" data-print>打印 / PDF</button></div></div><div class="progress" aria-hidden="true"></div></header><div class="reader-layout"><aside class="chapter-toc"><span class="part-label">全书导航</span><nav aria-label="全书目录"><a href="#c01">从对话到工具调用</a><a href="#c02">ReAct：让模型真正调用工具</a><a href="#c03">规划、反思与搜索</a><a href="#c04">搭建一条 RAG 链路</a><a href="#c05">从检索到检索策略</a><a href="#c06">评测 RAG 与处理 PDF</a><a href="#c07">记忆的四种实现</a><a href="#c08">多智能体如何协作</a><a href="#c09">模型路由与成本选择</a><a href="#c10">Harness：约束与验证</a><a href="#c11">Loop Engineering</a><a href="#c12">测试与持续交付</a><a href="#c13">从零实现大语言模型</a><a href="#c14">Hermes 的运行时与记忆</a><a href="#c15">waku：精简工程实践</a><a href="#c16">Pi：Core 与 Interactive</a><a href="#c17">用 LangGraph 组织应用</a><a href="#c18">DeepSeek Harness 与边缘 Agent</a><a href="#c19">附录：学习地图与研究笔记</a><a href="#c20">Agentic RAG：多库路由与失败出口</a><a href="#c21">多 Agent 实战：分层、监督与运维</a><a href="#c22">20 个 Harness 机制的完整工作过程</a><a href="#c23">六个 Harness 项目与 Ragent 平台</a><a href="#c24">Hermes 专题：从消息到记忆与评测</a><a href="#c25">不读代码的全书推演与术语手册</a><a href="#coverage">项目覆盖地图</a></nav></aside><main id="main" class="reading"><header class="chapter-head" id="book-contents"><span class="edition">阅读本 2.0 · 单文件离线版</span><h1>AI 工程师<br>从原理到项目</h1><p class="deck">18 章主线 · 学习附录 · 6 篇实战补编 · 项目覆盖地图</p><p>本合订文件内嵌正文、重绘图解、练习、样式与搜索，可单独保存后离线阅读。工具循环、公共自行车调度和海洋观测案例均已重新编写。基础概念可先查<a href="#c25-glossary">术语手册</a>，再做<a href="#c25">离线演算</a>；源项目运行不属于打开本文件的前提。</p><p class="meta">案例演算不冒充项目实测，架构候选不冒充已上线能力。外部资料用于可选核验，正文在没有网络时仍可读。</p><details class="mobile-toc"><summary>展开全书目录</summary><nav aria-label="移动版全书目录"><a href="#c01">从对话到工具调用</a><a href="#c02">ReAct：让模型真正调用工具</a><a href="#c03">规划、反思与搜索</a><a href="#c04">搭建一条 RAG 链路</a><a href="#c05">从检索到检索策略</a><a href="#c06">评测 RAG 与处理 PDF</a><a href="#c07">记忆的四种实现</a><a href="#c08">多智能体如何协作</a><a href="#c09">模型路由与成本选择</a><a href="#c10">Harness：约束与验证</a><a href="#c11">Loop Engineering</a><a href="#c12">测试与持续交付</a><a href="#c13">从零实现大语言模型</a><a href="#c14">Hermes 的运行时与记忆</a><a href="#c15">waku：精简工程实践</a><a href="#c16">Pi：Core 与 Interactive</a><a href="#c17">用 LangGraph 组织应用</a><a href="#c18">DeepSeek Harness 与边缘 Agent</a><a href="#c19">附录：学习地图与研究笔记</a><a href="#c20">Agentic RAG：多库路由与失败出口</a><a href="#c21">多 Agent 实战：分层、监督与运维</a><a href="#c22">20 个 Harness 机制的完整工作过程</a><a href="#c23">六个 Harness 项目与 Ragent 平台</a><a href="#c24">Hermes 专题：从消息到记忆与评测</a><a href="#c25">不读代码的全书推演与术语手册</a><a href="#coverage">项目覆盖地图</a></nav></details></header><section class="book-search" id="book-search"><h2>搜索全书</h2><label for="fulltext-search">关键词（空格分隔表示同时匹配）</label><input id="fulltext-search" class="index-search" type="search" placeholder="例如：审批、KV Cache、Ragent" autocomplete="off" aria-describedby="fulltext-status"><p id="fulltext-status" role="status" aria-live="polite"></p><ol id="fulltext-results"></ol><noscript>脚本已关闭，正文仍完整可读；请用浏览器 Ctrl+F 搜索。</noscript></section><article class="volume" id="c01"><header class="chapter-head"><span class="edition">第一篇 · 建立 Agent 的基本模型</span><h1>从对话到工具调用</h1><p class="deck">用一条站点库存查询拆开工具调用：模型提交请求，宿主核验参数并读取库存，答案里的数字必须能回到那次读取。</p><p class="meta">第 01 章 · 完整章节 · 先修：Python 函数、JSON、基本的 LLM 对话接口</p></header>
 
 
@@ -2308,7 +2439,7 @@ P05 的单角色、gen-eval、plan-gen-eval 是同需求的平行方案。</pre>
 <ol><li id="c25-note-1"><strong>编辑补充：</strong>浮标、时间窗、价格和评测数字均为教学设置。材料中的实现事实仍有快照边界，没有把新的背景写成源项目原有功能。 <a class="note-back" href="#c25-note-ref-1">返回正文 ↑</a></li><li id="c25-note-2"><strong>编辑补充：</strong>固定轨迹与手算适合核对特定规则，但不提供完整安全认证。报告验证结果时，将真实执行、模拟检查与未执行项分别列明。 <a class="note-back" href="#c25-note-ref-2">返回正文 ↑</a></li></ol>
 </section>
 </article><article class="volume" id="coverage"><header class="chapter-head"><span class="edition">阅读本 2.0 · 项目覆盖核对</span><h1>项目覆盖地图</h1><p class="deck">从材料找到解释，从解释确认边界。</p></header><section id="coverage-scope"><h2>覆盖口径：覆盖教学内容，不等于逐行转录</h2>
-<p>这张地图将源快照 <code>439d3f3</code> 中的 <strong>4567 个跟踪文件</strong> 分配到 <strong>151 个材料单元</strong>，为每个单元提供章节入口。它核对的是资料归属；正文围绕机制与执行边界重新讲解，不承诺逐行注释所有文件。</p>
+<p>这张地图将源快照 <code>157417a</code> 中的 <strong>4567 个跟踪文件</strong> 分配到 <strong>151 个材料单元</strong>，为每个单元提供章节入口。它核对的是资料归属；正文围绕机制与执行边界重新讲解，不承诺逐行注释所有文件。</p>
 <p>Ragent、Schedulr 与展示站等大型材料按模块和运行链阅读，组件细节与 API 全集仍需回到源码。不同语言、讲义、图片与 Notebook 中重复的内容归于同一知识单元，测试用于核验所属行为，日志和导出文件则作为相应流程的产物。</p>
 <p>章节可离线阅读，但源项目运行可能需要另外安装依赖、准备数据或付费服务。本次不声称全部项目均已运行。Hermes 学习副本并非完整可执行发行版；DeepSeek Harness 与 Edge Agent 的研究说明也不能当作已验收系统。正文分别标记<strong>实现事实、虚构案例、候选设计与离线演算</strong>。<sup><a class="note-ref" id="coverage-note-ref-1" href="#coverage-note-1">1</a></sup></p></section>
 <section id="coverage-reading"><h2>只看 HTML 的三种读法</h2><figure class="book-diagram"><table><thead><tr><th>当前问题</th><th>从哪里开始</th><th>读完核对什么</th></tr></thead><tbody><tr><td>缺少基础词义</td><td>25 术语与手算</td><td>能否独立写出状态变化</td></tr><tr><td>需要理解执行</td><td>01 至 18 主线</td><td>谁决定、谁执行、谁验证</td></tr><tr><td>正在接入工程</td><td>20 至 24 补编</td><td>边界、依赖与失败合同</td></tr><tr><td>要查来源</td><td>本页映射</td><td>章节对应哪些材料单元</td></tr></tbody></table><figcaption>图 A-1 · 按阅读问题选择入口，不要求所有读者沿同一条线前进。19 保留学习附录，合订本用于离线检索。</figcaption></figure><p>概念可用<a href="#book-search">合订本搜索</a>定位，材料路径可查下表。先用章节中的输入、状态和结果复核理解，再决定是否配置项目环境；阅读验收与运行验收是两项工作。<sup><a class="note-ref" id="coverage-note-ref-2" href="#coverage-note-2">2</a></sup></p></section>
@@ -2450,6 +2581,113 @@ addEventListener('afterprint', () => {
   printState = null;
   filterChapters();
 });
+
+/* Progressive reading controls; no network and no dependency on writable storage. */
+(() => {
+  const root = document.documentElement;
+  const themeKey = 'ebook-reader:appearance';
+  const get = key => { try { return localStorage.getItem(key); } catch { return null; } };
+  const put = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
+  let theme = get(themeKey) || root.dataset.theme || 'auto';
+  if (!['auto', 'light', 'dark'].includes(theme)) theme = 'auto';
+  const old = document.querySelector('button[data-theme]');
+  const button = old ? old.cloneNode(true) : document.createElement('button');
+  button.type = 'button';
+  button.dataset.readerTheme = '';
+  button.classList.add('control');
+  if (old) old.replaceWith(button);
+  else {
+    const tools = document.querySelector('.reader-tools,.topbar .tools,.topbar,.bar-inner nav,.tools');
+    if (tools) tools.append(button);
+  }
+  function applyTheme() {
+    root.dataset.theme = theme;
+    button.textContent = {auto:'自动',light:'浅色',dark:'深色'}[theme];
+    button.setAttribute('aria-label', '外观：' + button.textContent + '，点击切换');
+    button.title = '依次切换自动、浅色、深色';
+  }
+  applyTheme();
+  button.addEventListener('click', () => {
+    theme = {auto:'light',light:'dark',dark:'auto'}[theme];
+    applyTheme(); put(themeKey, theme);
+  });
+
+  const bookNav = document.querySelector('.layout>nav.toc');
+  if (bookNav) {
+    const wrapper = document.createElement('details');
+    wrapper.className = 'reader-book-toc';
+    wrapper.open = matchMedia('(min-width:1001px)').matches;
+    const summary = document.createElement('summary'); summary.textContent = '全书目录';
+    bookNav.before(wrapper); wrapper.append(summary, bookNav);
+  }
+  const rail = document.querySelector('.chapter-rail');
+  if (rail && !document.querySelector('.reader-mobile-toc')) {
+    const list = rail.querySelector('ol');
+    const header = document.querySelector('.chapter-head');
+    if (list && header) {
+      const toc = document.createElement('details');
+      toc.className = 'reader-mobile-toc';
+      const label = document.createElement('summary');
+      label.textContent = '本章目录';
+      toc.append(label, list.cloneNode(true));
+      header.after(toc);
+    }
+  }
+  document.querySelectorAll('table').forEach(table => {
+    if (table.closest('.table-wrap')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'table-wrap';
+    table.before(wrap); wrap.append(table);
+  });
+  document.querySelectorAll('.table-wrap').forEach(wrap => {
+    wrap.tabIndex = 0;
+    wrap.setAttribute('role', 'region');
+    if (!wrap.hasAttribute('aria-label')) wrap.setAttribute('aria-label', '数据表，可横向滚动');
+  });
+  document.querySelectorAll('pre').forEach(pre => {
+    pre.tabIndex = 0;
+    pre.setAttribute('aria-label', '代码示例，可横向滚动');
+  });
+  document.querySelectorAll('.prose pre,.content pre').forEach(pre => {
+    if (pre.querySelector('button')) return;
+    const copy = document.createElement('button');
+    copy.className = 'copy'; copy.type = 'button'; copy.textContent = '复制';
+    pre.append(copy);
+  });
+  document.querySelectorAll('button.copy').forEach(oldButton => {
+    // Replace the original listener so clipboard rejection always has a recovery.
+    const copy = oldButton.cloneNode(true);
+    oldButton.replaceWith(copy);
+    copy.setAttribute('aria-label', '复制这段代码');
+    copy.addEventListener('click', async () => {
+      const code = copy.closest('pre')?.querySelector('code');
+      if (!code) return;
+      try {
+        await navigator.clipboard.writeText(code.textContent);
+        copy.textContent = '已复制';
+      } catch {
+        const range = document.createRange(); range.selectNodeContents(code);
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        copy.textContent = '已选中';
+        copy.title = '浏览器限制复制，请按 Ctrl+C 或长按复制';
+      }
+      setTimeout(() => { copy.textContent = '复制'; }, 1600);
+    });
+  });
+  const links = [...document.querySelectorAll('.chapter-rail a[href^="#"],.reader-mobile-toc a[href^="#"],nav.toc>a[href^="#"]')];
+  const headings = [...new Set(links.map(link => document.getElementById(decodeURIComponent(link.hash.slice(1)))).filter(Boolean))];
+  if (headings.length && 'IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) if (entry.isIntersecting) {
+        links.forEach(link => {
+          if (decodeURIComponent(link.hash.slice(1)) === entry.target.id) link.setAttribute('aria-current','location');
+          else link.removeAttribute('aria-current');
+        });
+      }
+    }, {rootMargin:'-10% 0px -65% 0px'});
+    headings.forEach(heading => observer.observe(heading));
+  }
+})();
 
 'use strict';
 // Search the embedded text, not fetch(): works from a moved, offline HTML file.

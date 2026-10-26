@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>安全边界：能聊天不等于能管理 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 12</div><div class="rail-title">安全边界：能聊天不等于能管理</div><ol><li><a href="#认证只回答第一个问题">认证只回答第一个问题</a></li><li><a href="#可见-可用-可写分开检查">可见、可用、可写分开检查</a></li><li><a href="#hitl-保存的是一项待决策动作">HITL 保存的是一项待决策动作</a></li><li><a href="#一条审批链的反例">一条审批链的反例</a></li><li><a href="#shell-文件-网络与秘密是不同面">Shell、文件、网络与秘密是不同面</a></li><li><a href="#bridge-会扩大需要审视的信任面">Bridge 会扩大需要审视的信任面</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 12 章</div><h1>安全边界：能聊天不等于能管理</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 10 分钟</div></header><div class="prose"><h2 id="认证只回答第一个问题">认证只回答第一个问题<a class="anchor" href="#认证只回答第一个问题" aria-label="链接到本节">#</a></h2>
+<p>林岚已经登录，是否就能下载任意工作区文件、取消任意线程或调用任意工具？显然不能。认证解决“是谁”，资源授权解决“能操作哪个对象”，工具策略解决“这次动作是否允许”，执行环境解决“动作能触及哪里”。</p>
+<p>JWT 中间件为 /api/ 路径设有明确豁免，并把已认证用户缓存到 request.state。WebSocket 路由还要自己处理相应认证，因为 HTTP 中间件的存在不自动等价为所有 WS 都被保护。</p>
+<p>首次安装还有 setup_lockdown：没有用户时，非设置与健康等允许入口返回 setup_required。这与已经登录后的资源校验是不同阶段。</p>
+<h2 id="可见-可用-可写分开检查">可见、可用、可写分开检查<a class="anchor" href="#可见-可用-可写分开检查" aria-label="链接到本节">#</a></h2>
+<p>api/common/agent.py 的 require_agent_row 处理所有者、共享和管理员相关检查；require_agent_owner_row 再要求管理权。聊天订阅、取消与 resolve_thread_id 又校验 thread 的用户和 Agent。</p>
+<p>沿这条调用链检查，比泛泛说“有 JWT 多用户隔离”更可靠。因为同一个专家可能被分享，单凭 agents.user_id 过滤无法描述所有合法访问；而允许访问共享专家也不该放开所有配置和私有线程。</p>
+<p>用户组、角色、资源策略分布在 users 与 repos 中。架构书可以解释边界，但不能凭看到这些文件就给出“通过安全审计”的结论。</p>
+<h2 id="hitl-保存的是一项待决策动作">HITL 保存的是一项待决策动作<a class="anchor" href="#hitl-保存的是一项待决策动作" aria-label="链接到本节">#</a></h2>
+<p>危险工具需要人工审批时，运行图暂停。宿主把请求与用户、专家、线程、会话关联，生成 pending 标识；用户的批准或拒绝通过对应恢复路径传回运行时。</p>
+<p>审批不是“模型问一句，你回答可以”。需要确认回答针对哪项动作、是否仍有效、是否属于当前主体、是否已经处理。项目有 HitlChannelCoordinator、pending store 与会话策略，用来协调 UI、CLI 和渠道差异。</p>
+<p>运行时恢复与普通流式调用也需要线程级执行保护，避免同一等待点被并发恢复。本书未对所有审批竞态执行测试，因此这里描述的是机制与检查入口，不承诺所有工具端到端精确一次。</p>
+<h2 id="一条审批链的反例">一条审批链的反例<a class="anchor" href="#一条审批链的反例" aria-label="链接到本节">#</a></h2>
+<p>研究专家准备发送带附件的邮件，界面展示收件人 A；用户批准前，模型或另一路请求把待发送对象改成 B。如果批准仅绑定“发邮件”这个工具名，而没有绑定具体参数和等待点，批准 A 就可能被误用来发送 B。</p>
+<p>验收应检查审批参数、pending_id、thread_id 和实际执行内容的一致性。工具参数修改后，是重新审批还是接受编辑，需要清楚契约。通用聊天文本不能成为任意工具的授权凭证。</p>
+<p>已经执行的邮件也不会因之后取消 turn 而自动撤回。审批控制未来执行，取消结束计算，补偿处理既有副作用，三件事要分开。</p>
+<h2 id="shell-文件-网络与秘密是不同面">Shell、文件、网络与秘密是不同面<a class="anchor" href="#shell-文件-网络与秘密是不同面" aria-label="链接到本节">#</a></h2>
+<p>工具护栏管理命令规则；工作区与文件系统保护约束路径；Docker、OpenSandbox 或宿主隔离机制决定进程环境；ssrf_guard 等网络检查涉及请求目标；Fernet 相关代码用于凭证封装。</p>
+<p>这些机制可以互补，不能互相替代。限制工作区路径不保证所有网络目标安全；加密数据库字段也不防止运行时日志泄漏。server.py 在普通日志级别降低 httpx/httpcore 输出，理由正是完整 URL 可能含 query secret。</p>
+<p>实际部署应使用受信任插件、最小权限凭证和清晰的运行账号。自托管表示控制部署位置，不表示模型供应商、连接器或远程工具永远不接收数据。</p>
+<h2 id="bridge-会扩大需要审视的信任面">Bridge 会扩大需要审视的信任面<a class="anchor" href="#bridge-会扩大需要审视的信任面" aria-label="链接到本节">#</a></h2>
+<p>跨实例请求经过隧道进入专家所在侧。必须同时确认连接所有者、对端登录身份、可转发路径及最终资源权限。本地 user 7 和远端 user 7 不是同一个人，不能靠整数相等进行身份映射。</p>
+<p>当前 tunnel_policy.py 有路径与方法约束。它比“通用 HTTP 隧道”这个协议能力更窄，且与前端远程能力清单可能不同。评审时应检查实际 allowlist，不按规划文档假定所有管理路径都允许或都禁止。</p>
+<details>
+<summary>最小负面测试矩阵</summary>
+
+<p>用未登录、普通所有者、共享使用者、无权用户和管理员分别访问专家、线程、文件、取消、审批与管理接口。再加过期 pending、重复批准、路径穿越、内网 URL 和错误桥接身份。正向“能聊一句”不能替代这些负面用例。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/middleware/jwt_auth.py"><code>src/octop/api/middleware/jwt_auth.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/middleware/setup_lockdown.py"><code>src/octop/api/middleware/setup_lockdown.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/common/agent.py"><code>src/octop/api/common/agent.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/gateway/hitl/coordinator.py"><code>src/octop/infra/gateway/hitl/coordinator.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/security/hitl_session.py"><code>src/octop/infra/agents/security/hitl_session.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/utils/ssrf_guard.py"><code>src/octop/infra/utils/ssrf_guard.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/bridge/tunnel_policy.py"><code>src/octop/infra/bridge/tunnel_policy.py</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>工具配置写入“只读”，但插件在宿主进程中直接调用文件写接口。提示词和 JWT 能否阻止它？</p>
+<p><strong>答案提示：</strong> 不能据此保证。插件程序处于不同信任层，需检查实际执行权限、加载来源与策略落实位置。模型侧声明只读不等于宿主级沙箱。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="11-teams.html"><small>上一章</small><strong>多 Agent：房间共享，状态分离</strong></a><a class="next" href="13-dashboard.html"><small>下一章</small><strong>前端架构：流式对话是一台状态机</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

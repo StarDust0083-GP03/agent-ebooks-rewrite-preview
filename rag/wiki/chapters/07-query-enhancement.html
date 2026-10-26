@@ -1,0 +1,24 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>查询增强：用户不一定会说“幂等” · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="07-query-enhancement"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#改写要保留业务限定">改写要保留业务限定</a></li><li><a href="#复杂问题可以拆-但要留住连接关系">复杂问题可以拆，但要留住连接关系</a></li><li><a href="#hyde-在查询时生成假设文档">HyDE 在查询时生成假设文档</a></li><li><a href="#hype-把生成问题提前到入库">HyPE 把生成问题提前到入库</a></li><li><a href="#这个阶段怎么选">这个阶段怎么选</a></li><li><a href="#对应代码与资料">对应代码与资料</a></li></ol></details><article class="content"><h1 id="查询增强-用户不一定会说-幂等">查询增强：用户不一定会说“幂等”</h1><p>用户问“为什么同一个通知来了两次，不能再发一次货”，文档写“回调幂等”。这类失败发生在表达对齐阶段。文档已经存在，也没有解析错误，但查询和片段未落到同一个检索入口。</p>
+<h2 id="改写要保留业务限定">改写要保留业务限定</h2><p>可以将问题改成“支付回调重复投递时，幂等和发货去重如何处理”。这让检索器看到领域词，但原问题仍然是回答目标。若用户问测试环境，不应改成生产环境；若用户问“为什么不能”，也不能改成“如何绕过”。</p>
+<p>实际流程可以保留原查询与改写查询两路结果，再按片段 ID 合并。日志记录原文、改写、被触发的检索路线，才能分清改写帮助了匹配，还是把问题改成更容易答的另一个问题。</p>
+<p>原文若包含商户信息或内部编号，发送到外部改写模型前也需要数据策略。不能因为这一步还没生成答案，就忽略外传风险。</p>
+<h2 id="复杂问题可以拆-但要留住连接关系">复杂问题可以拆，但要留住连接关系</h2><p>“退款失败为什么不能直接再发起？该找谁处理？”可以拆成退款失败规则和模块负责人两个子问题。第二个问题可能要先查模块归属，再查团队职责，不能提前假定负责人就是检索结果中出现次数最多的人。</p>
+<p>拆解后按子问题检查证据，避免第一个问题返回很多相关材料，掩盖第二个问题一条也没有。查询数、每路 top-k 和总等待时间应设上限，否则一句用户问题可能扩散成很多外部调用。</p>
+<p>Step-back 则将具体问题暂时上提为更一般背景，比如先了解“异步通知的一致性风险”。它适合补充解释，却不能替代当前规范的精确条件。</p>
+<h2 id="hyde-在查询时生成假设文档">HyDE 在查询时生成假设文档</h2><p>HyDE 先让语言模型写一段可能回答问题的文档，再为这段假设文本生成向量，检索真实资料。它利用文档式表达接近文档集合的表示，假设文本中可能包含错误细节。</p>
+<pre tabindex="0"><code class="hljs">用户问题 → 假设文档 → 文档向量检索 → 真实原文 → 证据包
+                 不直接作为事实依据 ↗</code></pre><p>这里最重要的边界是：假设文档只提供检索线索。假设里写了“按订单号去重”，真实规范写“渠道流水号加事件类型”，最终回答应以真实规范为依据，不能把假设答案混进证据包。</p>
+<p>上游 README 有将 HyDE 描述为假设问题的表述，但对应 Notebook 和原论文都以生成假设文档为关键步骤。本书据此区分，不沿用容易混淆的名称。</p>
+<h2 id="hype-把生成问题提前到入库">HyPE 把生成问题提前到入库</h2><p>HyPE 在索引时为每个片段生成若干可能的问题，用这些问题的向量作代理。用户的问题命中代理后，返回原片段。因此是问题与问题之间的匹配，再回到原文。</p>
+<p>假设每块生成 5 个问题，索引向量数也可能明显增加。它没有查询时生成假设文档的那次 LLM 开销，但仍然需要查询 embedding、检索和回答，不是“查询完全没有成本”。文档更新后，问题代理也需要重建。</p>
+<p>代理应保存父片段 ID，多个代理命中同一片段时去重。不能把“可能被问的问题”当成文档已经回答的事实。Document Augmentation 与 HyPE 都利用问题增强，索引组织和回映射方式应按具体实现核对。</p>
+<h2 id="这个阶段怎么选">这个阶段怎么选</h2><p>如果只差几个固定术语，先试受控同义词表或原查询加改写。问题结构复杂时试拆解。短问题与长段落表示不对齐时，再比较 HyDE；查询量很大、文档相对稳定时，可以评估把开销前移的 HyPE。每次保留同一批独立题目对照。</p>
+<h2 id="对应代码与资料">对应代码与资料</h2><p>本章模型步骤是机制说明，未在离线 CLI 中实现。</p>
+<ul>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/query_transformations.ipynb">Query Transformations</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/HyDe_Hypothetical_Document_Embedding.ipynb">HyDE</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/HyPE_Hypothetical_Prompt_Embeddings.ipynb">HyPE</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/document_augmentation.ipynb">Document Augmentation</a></li>
+<li><a href="https://arxiv.org/abs/2212.10496">HyDE 论文</a></li>
+</ul>
+</article><nav class="pager" aria-label="篇章导航"><a href="06-fusion-reranking.html"><small>上一篇</small>混合检索与重排：把不同候选放进同一张账</a><a href="08-context.html"><small>下一篇</small>证据组装：检索到了，还要让模型读到</a></nav></main><script src="../assets/wiki.js"></script></body></html>

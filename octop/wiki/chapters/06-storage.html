@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>存储与历史：不要寻找唯一数据库 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 06</div><div class="rail-title">存储与历史：不要寻找唯一数据库</div><ol><li><a href="#聊天丢了-可能有四种含义">“聊天丢了”可能有四种含义</a></li><li><a href="#sqlite-与-postgresql-接口相近-约束仍在">SQLite 与 PostgreSQL：接口相近，约束仍在</a></li><li><a href="#把-checkpoint-当历史库会怎样">把 checkpoint 当历史库会怎样</a></li><li><a href="#可选-v2-历史为何值得单独看">可选 v2 历史为何值得单独看</a></li><li><a href="#三个数据库不等于一个事务">三个数据库不等于一个事务</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 06 章</div><h1>存储与历史：不要寻找唯一数据库</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 10 分钟</div></header><div class="prose"><h2 id="聊天丢了-可能有四种含义">“聊天丢了”可能有四种含义<a class="anchor" href="#聊天丢了-可能有四种含义" aria-label="链接到本节">#</a></h2>
+<p>林岚刷新页面后看不到最后一段文字。它可能从未被模型成功产出，也可能产出后未持久化，可能已保存但读取失败，也可能已读出却被前端状态合并覆盖。单看截图，无法判断数据库是不是坏了。</p>
+<p>Octop 的状态分散在不同用途的存储中。理解这张表，比先背数据库表名更有用。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>类别</th>
+<th>保存什么</th>
+<th>不应替代什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>控制面</td>
+<td>用户、专家、Provider、通道、cron、设置、权限等</td>
+<td>图执行现场</td>
+</tr>
+<tr>
+<td>checkpoint</td>
+<td>线程执行状态与消息上下文</td>
+<td>面向用户的完整历史契约</td>
+</tr>
+<tr>
+<td>展示历史 / 轨迹</td>
+<td>消息投影、工具过程、回合状态</td>
+<td>外部动作的最终业务凭证</td>
+</tr>
+<tr>
+<td>Agent Memory</td>
+<td>提炼、召回和维护的长期信息</td>
+<td>原始材料与当前事实核验</td>
+</tr>
+<tr>
+<td>工作区</td>
+<td>提示文件、技能、输入附件和输出产物</td>
+<td>控制面所有配置</td>
+</tr>
+<tr>
+<td>知识索引</td>
+<td>文档切片与 embedding</td>
+<td>聊天状态与权限来源</td>
+</tr>
+</tbody></table></div>
+<h2 id="sqlite-与-postgresql-接口相近-约束仍在">SQLite 与 PostgreSQL：接口相近，约束仍在<a class="anchor" href="#sqlite-与-postgresql-接口相近-约束仍在" aria-label="链接到本节">#</a></h2>
+<p>DatabasePool 协议提供 connect、transaction 和 close。默认 SqlitePool 使用一条共享连接，以 RLock 协调本进程访问，开启外键与 WAL。事务使用 BEGIN IMMEDIATE，提前取得写入相关锁，降低先读后写时遇到快照冲突的风险。</p>
+<p>PostgresPool 在边界提供兼容层，仓储里的问号占位符转换成 psycopg 形式。当前 qmark_to_pyformat 是简单替换，源码说明它不理解 SQL 字符串字面量。它适用于受控仓储 SQL，不是一个通用 SQL 方言转换器。</p>
+<p>迁移文件有 SQLite 与 PostgreSQL 两套。控制面不负责安装 vector 扩展，记忆的 DDL 也不应混入控制面迁移。ADR 002 特别强调单个活跃 Octop 写入者和不提供 SQLite 到 PG 的自动数据迁移承诺。</p>
+<h2 id="把-checkpoint-当历史库会怎样">把 checkpoint 当历史库会怎样<a class="anchor" href="#把-checkpoint-当历史库会怎样" aria-label="链接到本节">#</a></h2>
+<p>运行图保存状态，是为了继续执行、上下文恢复与中断处理。聊天界面希望获得稳定分页、说话人、工具展示、错误状态和导出。这两个读写模式不同，所以项目增加了消息投影及独立历史服务。</p>
+<p>当上下文做压缩时，后续模型不一定再读取之前全部内容；用户仍可能需要看原始对话。反过来，历史里存在一段可读文本，也不能证明图能从那里恢复到同一个工具等待点。</p>
+<p>因此“备份了聊天导出 JSON”不等于备份可恢复的运行环境；“保留了 checkpoint”也不自动证明用户历史展示完整。</p>
+<h2 id="可选-v2-历史为何值得单独看">可选 v2 历史为何值得单独看<a class="anchor" href="#可选-v2-历史为何值得单独看" aria-label="链接到本节">#</a></h2>
+<p>快照包含默认关闭的 history_v2。它在本地 history_v2.sqlite 中按段管理历史，用 documents 与 bodies 保存结构和可复用正文。旧段并不批量迁移，新旧格式经兼容读接口统一展示。启用后需要保留对应 required 标记。</p>
+<p>它的可靠性取舍很明确：需要保存的流式内容先等待事务提交，再转发给客户端。于是有两种可解释的崩溃窗口：</p>
+<pre><code class="language-text">提交前退出：这条路径不会先把未提交内容发给前端
+提交后、发送前退出：历史已有，前端可能还没看到
+</code></pre>
+<p>这不是外部工具精确一次执行保证，也不涵盖上游从未发给采集器的事件。逐事件提交还会增加事务次数及延迟，可靠性收益有成本。</p>
+<p>v2 只支持 SQLite 控制面。存在归档文件或标记时，不能假定把开关关掉就能删除文件，或直接退到不认识新格式的旧版本。</p>
+<h2 id="三个数据库不等于一个事务">三个数据库不等于一个事务<a class="anchor" href="#三个数据库不等于一个事务" aria-label="链接到本节">#</a></h2>
+<p>一轮任务可能写控制面线程信息、历史归档和 Agent checkpoint。这些存储没有因为处于同一进程就自动形成跨库原子事务。</p>
+<p>docs/versioned-history.md 明确说明运行中多库备份不保证同一瞬间，并限制涉及 v2 的现有在线恢复与运行时换库。更稳妥的恢复实验，是停机获取完整目录副本，用兼容版本在规定路径恢复，再验证各层引用。</p>
+<p>不要只复制一个 octop.db 就宣布已备份全部对话。也不要把不同时间点的主库、归档和工作区随意拼成一个“最新备份”。</p>
+<details>
+<summary>数据库表阅读顺序</summary>
+
+<p>先看 users、agents、sessions、threads 的身份关系，再看 thread_messages 与 trajectory_events 的投影；随后对照 providers、channels、cron_jobs 和 settings。用户组、角色与分享范围还要看后续迁移。001_initial.sql 是初始结构，不是完整最终 schema。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/adr/002-database-backends.md"><code>docs/adr/002-database-backends.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/db/pool.py"><code>src/octop/infra/db/pool.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/versioned-history.md"><code>docs/versioned-history.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/history/service.py"><code>src/octop/infra/history/service.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/history/recorder.py"><code>src/octop/infra/history/recorder.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/db/migrations/001_initial.sql"><code>src/octop/infra/db/migrations/001_initial.sql</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>工作室决定迁移到 PostgreSQL，并同时开启 history_v2，把全部聊天记录放到远程数据库。这个方案哪里不成立？</p>
+<p><strong>答案提示：</strong> v2 在该快照下要求 SQLite 控制面，且实际使用本地独立归档；知识索引也仍有本地 sidecar。要按数据类别评估迁移，不能用一个控制面选项推导全平台存储行为。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="05-identity.html"><small>上一章</small><strong>身份与会话：四种 ID，四条边界</strong></a><a class="next" href="07-workspace.html"><small>下一章</small><strong>工作区后端：远程文件不等于远程执行</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

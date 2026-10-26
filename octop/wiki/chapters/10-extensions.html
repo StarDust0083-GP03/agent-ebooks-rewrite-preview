@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>工具与扩展：Skill、Plugin、Connector 和 MCP · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 10</div><div class="rail-title">工具与扩展：Skill、Plugin、Connector 和 MCP</div><ol><li><a href="#四种扩展不是四个同义词">四种扩展不是四个同义词</a></li><li><a href="#从用户配置到本轮工具">从用户配置到本轮工具</a></li><li><a href="#connector-模式决定实际调用位置">Connector 模式决定实际调用位置</a></li><li><a href="#大型-ui-载荷为什么要离开模型上下文">大型 UI 载荷为什么要离开模型上下文</a></li><li><a href="#一次外部写操作需要几道门">一次外部写操作需要几道门</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 10 章</div><h1>工具与扩展：Skill、Plugin、Connector 和 MCP</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 8 分钟</div></header><div class="prose"><h2 id="四种扩展不是四个同义词">四种扩展不是四个同义词<a class="anchor" href="#四种扩展不是四个同义词" aria-label="链接到本节">#</a></h2>
+<p>工作室想让专家按固定规范写稿，想加一个稿件状态面板，还想连腾讯文档。这三种需求不该都用“安装插件”笼统处理。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>机制</th>
+<th>主要解决什么</th>
+<th>典型产物</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Skill</td>
+<td>给 Agent 可发现、可读取的操作知识</td>
+<td>SKILL.md 与配套文件</td>
+</tr>
+<tr>
+<td>Plugin</td>
+<td>宿主/运行库可加载的程序扩展</td>
+<td>工具、中间件、通道或 UI 协议载荷</td>
+</tr>
+<tr>
+<td>Connector</td>
+<td>把某用户的外部服务账户配置接成能力</td>
+<td>凭证、实例配置、可用工具</td>
+</tr>
+<tr>
+<td>MCP</td>
+<td>一套工具发现和调用的互联协议</td>
+<td>server 配置、工具 schema 与调用</td>
+</tr>
+</tbody></table></div>
+<p>技能可以指导模型调用工具，但不能代替服务端鉴权。MCP 能传递工具请求，也不会自动为每个工具赋予最小权限。</p>
+<h2 id="从用户配置到本轮工具">从用户配置到本轮工具<a class="anchor" href="#从用户配置到本轮工具" aria-label="链接到本节">#</a></h2>
+<p>装配时，AgentManager 从 ConnectorService 构造用户对应的 MCP 配置，结合内置、知识库、移动端和插件工具形成运行时能力。部分能力可以在当轮选择中继续收窄。</p>
+<p>需要区分三个集合：系统安装了什么、这位用户授权了什么、这位专家这一轮可用什么。如果插件已安装但未启用，不应仅因它出现在磁盘上就进入每个专家的工具列表。</p>
+<p>PluginManager 启动时播种 bundled 插件并加载已安装插件。官方架构文档指出 bundled 默认关闭。插件代码在宿主边界执行，其风险不能与“读取一段技能文本”混为一谈。</p>
+<h2 id="connector-模式决定实际调用位置">Connector 模式决定实际调用位置<a class="anchor" href="#connector-模式决定实际调用位置" aria-label="链接到本节">#</a></h2>
+<p>catalog.json 是内置连接器元数据源。不同模式有不同路径：</p>
+<ul>
+<li>remote：运行库连接供应商 MCP 地址。</li>
+<li>gateway：使用进程内 Python 适配器，配置中可能只是名称占位。</li>
+<li>internal：Octop 托管 /api/internal/mcp，运行库通过 HTTP 加载。</li>
+<li>目录中也有 stdio 类型接入，应按相应配置和调用器理解。</li>
+</ul>
+<p>同样叫“连接器”，有的走网络，有的进程内执行，还有的启动子进程。超时、日志、凭证传播和资源释放因而不同。新增服务时应先确定调用位置，再设计配置页面。</p>
+<h2 id="大型-ui-载荷为什么要离开模型上下文">大型 UI 载荷为什么要离开模型上下文<a class="anchor" href="#大型-ui-载荷为什么要离开模型上下文" aria-label="链接到本节">#</a></h2>
+<p>插件可能返回适合界面渲染的 octop_ui 内容。让模型反复看到一份大型 UI 数据会浪费上下文；只保留一个空壳又会让界面无法显示。</p>
+<p>OctopUiOffloadMiddleware 的任务就是处理这类 envelope，使模型侧和 UI 侧按各自需要消费。它的作用范围是特定插件载荷，不是任意工具结果的通用对象存储方案。相关文档独立说明协议，避免前端、工具和中间件各猜一套字段。</p>
+<p>这是一个典型产品化问题：运行库只要能返回工具结果，产品还必须考虑结果的体积、展示与后续上下文预算。</p>
+<h2 id="一次外部写操作需要几道门">一次外部写操作需要几道门<a class="anchor" href="#一次外部写操作需要几道门" aria-label="链接到本节">#</a></h2>
+<p>假设模型准备把提纲写进腾讯文档。至少需要确认当前用户的连接器实例有效，工具在当前专家上启用，参数符合 schema，工具策略允许或触发审批，真正调用供应商后得到可核验结果。</p>
+<p>供应商请求超时尤其危险：可能从未写入，也可能已写入但返回丢了。模型重试不是业务幂等。若工具支持幂等键、查询已创建文档或可对账操作记录，应在工具边界使用，不能让模型“再试一下”承担去重职责。</p>
+<p>这与 SAM 系列回调幂等的讲解思路相通：先找重复从哪里来，再为具体动作选稳定标识。它不意味着 Octop 已内置支付式三层幂等，或每个 MCP server 都支持同一保证。</p>
+<details>
+<summary>新增连接器时的最小检查表</summary>
+
+<p>核对凭证属于谁、如何加密、授权可否撤销、工具命名是否冲突、schema 是否兼容、读写是否区分、超时能否判定结果、日志是否含秘密。探测成功只证明一条接入路径可用，不证明所有业务动作安全。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/manager.py"><code>src/octop/infra/agents/manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/plugins/manager.py"><code>src/octop/infra/agents/plugins/manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/connectors/builder.py"><code>src/octop/infra/connectors/builder.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/connectors/catalog.json"><code>src/octop/infra/connectors/catalog.json</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/octop-ui-payload-offload.md"><code>docs/octop-ui-payload-offload.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/plugins/README_CN.md"><code>plugins/README_CN.md</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>一份 Skill 写着“只有管理员可以外发”。普通用户能否因此被服务端可靠阻止调用发送工具？</p>
+<p><strong>答案提示：</strong> 不能。模型提示是行为指导，不是服务端授权。必须在工具调用边界根据认证主体与策略校验，必要时进入 HITL；不能把用户可修改的文本当安全策略源。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="09-memory-rag.html"><small>上一章</small><strong>记忆与知识库：两条不同的检索路径</strong></a><a class="next" href="11-teams.html"><small>下一章</small><strong>多 Agent：房间共享，状态分离</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

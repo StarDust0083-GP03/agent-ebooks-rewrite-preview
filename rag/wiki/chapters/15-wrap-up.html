@@ -1,0 +1,72 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>完结篇：用一次请求串起整套设计 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="15-wrap-up"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#先决定这次能读什么">先决定这次能读什么</a></li><li><a href="#再找到两类必要证据">再找到两类必要证据</a></li><li><a href="#证据进入模型前还经过一次选择">证据进入模型前还经过一次选择</a></li><li><a href="#回答能说到哪里">回答能说到哪里</a></li><li><a href="#按失败现象选技术">按失败现象选技术</a></li><li><a href="#这版实际交付了什么">这版实际交付了什么</a></li><li><a href="#对应代码">对应代码</a></li></ol></details><article class="content"><h1 id="完结篇-用一次请求串起整套设计">完结篇：用一次请求串起整套设计</h1><p>回到开篇：“支付回调已经验签了，重复通知还会不会重复发货？”我们希望系统回答这套教学规范的处理方式，并指出验签与幂等是不同检查。用一次完整请求把前面各篇放回各自的位置。</p>
+<h2 id="先决定这次能读什么">先决定这次能读什么</h2><p>应用从认证结果取得身份。教学程序用 Alice 作替身，允许公共资料和 Alice 私人笔记，排除 Bob 笔记；现行视图排除 callback-v1。这里先解决能否读取，不让高相关分数覆盖权限和版本约束。</p>
+<p>真实请求还应固定索引版本。本地 JSONL 是预先准备的静态快照，不存在并发发布，生产系统则需要明确本次查询读到哪个完整版本。</p>
+<h2 id="再找到两类必要证据">再找到两类必要证据</h2><p>查询包含“回调”“验签”“幂等”。BM25 与词频余弦各自产生排名，RRF 按片段 ID 融合，返回 <code>callback-v2:0</code> 和 <code>callback-v2:1</code>。我们没有将两路数组按下标相加，也不把融合分数解释为正确概率。</p>
+<p>第一条讲先验签，再核对商户、订单、金额和币种；第二条讲以渠道流水号和事件类型做幂等，重复通知不重复发货。缺少任意一条，都不足以完整回答开篇问题。</p>
+<p>如果用户改问“同一个消息来了两次怎么办”，基线可能下降。这是第 7 篇查询增强的实验机会，不需要直接跳到图谱。如果问“回调模块由谁负责”，才需要二次查团队或图关系。</p>
+<h2 id="证据进入模型前还经过一次选择">证据进入模型前还经过一次选择</h2><p>候选可以按同文档版本补邻段，重复块按 ID 去重，再由打包器加入来源与正文。本次默认实验的两个块共 168 个字符，都进入 <code>injected</code>。</p>
+<p>把 budget 改成很小，可能只剩一条甚至全空。观察检索前后指标，就能知道错误出在预算，而不是误以为 embedding 变差。接入模型时，还要将字符控制升级为实际 Token 总预算。</p>
+<h2 id="回答能说到哪里">回答能说到哪里</h2><p>下面是根据教学材料手工编写的示范回答，不是配套代码的模型输出：</p>
+<blockquote>
+<p>验签用于确认回调真实性，还需要按规范核对商户、订单、金额和币种后更新状态。[callback-v2:0] 重复通知按渠道流水号与事件类型做幂等，不重复发货；通知失败进入重试队列。[callback-v2:1]</p>
+</blockquote>
+<p>它没有声称某笔真实订单已经发货，也没有执行退款或修改状态。若用户问实际到账情况，下一步应查询授权业务系统，不能从规范文档推出当前交易结果。</p>
+<h2 id="按失败现象选技术">按失败现象选技术</h2><table>
+<thead>
+<tr>
+<th>观察到的失败</th>
+<th>优先检查</th>
+<th>后续可比较的方法</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>原文数值或顺序错</td>
+<td>解析输出</td>
+<td>OCR、版面与表格感知</td>
+</tr>
+<tr>
+<td>块内主语或例外丢失</td>
+<td>切分与标题</td>
+<td>结构切分、语义或命题切分</td>
+</tr>
+<tr>
+<td>表达不同导致漏召回</td>
+<td>查询和表示</td>
+<td>改写、HyDE、HyPE、语义召回</td>
+</tr>
+<tr>
+<td>已召回但排得靠后</td>
+<td>候选池和排名</td>
+<td>融合、重排</td>
+</tr>
+<tr>
+<td>证据缺前后文</td>
+<td>同文档上下文</td>
+<td>邻域扩展、RSE</td>
+</tr>
+<tr>
+<td>整体主题难覆盖</td>
+<td>平面索引的局限</td>
+<td>层次摘要、RAPTOR、MemoRAG</td>
+</tr>
+<tr>
+<td>跨实体关系缺失</td>
+<td>连接路径</td>
+<td>二次检索、Graph RAG</td>
+</tr>
+<tr>
+<td>图表内容不可见</td>
+<td>资料表示</td>
+<td>Captioning、页面图像检索</td>
+</tr>
+</tbody></table>
+<p>这张表是排查顺序，不是方法效果排名。每引入一项，都要在同一题集和资料版本上检查收益、费用与失败边界。</p>
+<h2 id="这版实际交付了什么">这版实际交付了什么</h2><p>书稿包含开篇、需求、技术方案和逐环节实现说明，附录保留上游 Notebook 全量入口、来源与最小实现。配套程序可离线演示检索、范围过滤、融合、扩展、预算和评估，不需要模型密钥。</p>
+<p>语义模型、Cross-Encoder、模型生成、图抽取、OCR、多模态和 Agent 在正文中作为扩展路线说明，没有在标准库实验中实现，也没有完成第三方远程效果复现。阅读网页和 EPUB 是书稿载体，不表示应用已经上线。</p>
+<p>沿着这条链路继续做时，先增加真实题目和当前资料，再接真实模型，最后根据失败选择复杂方案。每次都保留候选与注入证据，才能知道新组件究竟改变了什么。</p>
+<h2 id="对应代码">对应代码</h2><ul>
+<li><a href="../../examples/mini_rag.py">完整实验入口</a></li>
+<li><a href="../../examples/evaluate.py">题集与配置对照</a></li>
+<li><a href="../../examples/test_mini_rag.py">边界测试</a></li>
+</ul>
+</article><nav class="pager" aria-label="篇章导航"><a href="14-production.html"><small>上一篇</small>上线边界：更新、权限和故障不能靠提示词兜底</a><a href="appendix-map.html"><small>下一篇</small>附录 A：上游 Notebook 阅读地图</a></nav></main><script src="../assets/wiki.js"></script></body></html>

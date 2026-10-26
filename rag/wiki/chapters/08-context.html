@@ -1,0 +1,23 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>证据组装：检索到了，还要让模型读到 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="08-context"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#相邻扩展怎样补足内容">相邻扩展怎样补足内容</a></li><li><a href="#rse-和固定窗口有何不同">RSE 和固定窗口有何不同</a></li><li><a href="#压缩时最怕删掉限定词">压缩时最怕删掉限定词</a></li><li><a href="#打包预算必须包含标签">打包预算必须包含标签</a></li><li><a href="#引用从真实注入-id-中产生">引用从真实注入 ID 中产生</a></li><li><a href="#对应代码与资料">对应代码与资料</a></li></ol></details><article class="content"><h1 id="证据组装-检索到了-还要让模型读到">证据组装：检索到了，还要让模型读到</h1><p>假设验签片段排第一，幂等片段排第二，查询已经成功。但证据预算太小，第一条放入后就满了，模型最后只读到验签。此时再优化召回分数，可能完全改变不了回答。</p>
+<h2 id="相邻扩展怎样补足内容">相邻扩展怎样补足内容</h2><p>本书 <code>expand</code> 以候选为中心，在同一文档、同一版本、当前可见范围内寻找位置相邻的块，再按原文顺序排列。重复进入的块按 ID 去重。</p>
+<pre tabindex="0"><code class="hljs">python3 examples/mini_rag.py \
+  --query <span class="hljs-string">&quot;回调处理顺序&quot;</span> --mode bm25 --k 1 --window 1</code></pre><p>虽然只召回一个中心块，这份教学资料的后续幂等段也会进入扩展候选。命中的是回调文档，不能因为退款文档里也有 position 1 就把它接上。位置只在文档版本内部有意义。</p>
+<p>上游 Context Enrichment 示例通过位置寻找邻块，帮助理解该机制。真实系统需要高效的主键或范围读取，不宜为找一个邻段就对向量库做全量搜索。</p>
+<h2 id="rse-和固定窗口有何不同">RSE 和固定窗口有何不同</h2><p>固定窗口不看邻段是否仍然相关，半径一就是前后各一块。Relevant Segment Extraction 则根据相关块的分布，构建更适合问题的连续片段。它有机会避免固定扩展过多背景，也需要更多阈值、片段评分和评估。</p>
+<p>两种方法都不能把物理邻接视为事实关联的充分证明。文档里相邻的两个模块，可能恰好采用相反策略。保留章节标题和来源边界，回答时才不容易混用。</p>
+<h2 id="压缩时最怕删掉限定词">压缩时最怕删掉限定词</h2><p>上下文压缩根据问题提取或概括内容，可以减少输入长度。对于“先验签，再核对金额和币种，核对成功后才更新状态”，压缩成“验签后更新状态”会丢掉中间条件，虽然更短，却不支持相同结论。</p>
+<p>提取原文子串通常比自由改写更便于引用。若使用模型摘要，摘要应带父片段关系，并对关键条件做抽样核验。不能因为压缩器与回答器是同一模型，就认为它们会相互纠正。</p>
+<h2 id="打包预算必须包含标签">打包预算必须包含标签</h2><p><code>pack_context</code> 将片段写成“编号、来源、正文”，整块能放下才加入，两个块之间的分隔字符也计入预算。它不截断句子，不把否定词切掉；遇到过大的块会跳过，继续尝试后面的块。</p>
+<pre tabindex="0"><code class="hljs">context, injected_ids = pack_context(chunks, budget=<span class="hljs-number">1200</span>)</code></pre><p>这个 budget 是字符数，便于离线复现。接模型前需要计算系统规则、用户问题、工具定义和证据的总 Token，并预留输出。字符预算不是供应商上下文限制的等价替代。</p>
+<p>该贪心打包器也没有“保证验签和幂等至少各一条”的能力。证据完整性要在评估中检查，必要时按子问题覆盖来选择。默认返回两个块不代表每个问题都有两个独立支持。</p>
+<h2 id="引用从真实注入-id-中产生">引用从真实注入 ID 中产生</h2><p>回答模型只能引用 <code>injected_ids</code>，不应引用被裁掉的候选。还要逐项判断引用正文是否支持结论。编号存在，只证明引用指向某个块，不证明模型的推断正确。</p>
+<p>用户界面可以把结论与支持片段放在一起。Explainable Retrieval 可以解释检索相关性，但相关性说明也不能替代逐句支持检查。一个“因为包含关键词所以命中”的解释，无法证明该规范当前适用。</p>
+<h2 id="对应代码与资料">对应代码与资料</h2><ul>
+<li><a href="../../examples/mini_rag.py">mini_rag.py</a>：<code>expand</code>、<code>pack_context</code></li>
+<li><a href="../../examples/test_mini_rag.py">预算、邻域与权限测试</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/context_enrichment_window_around_chunk.ipynb">Context Enrichment</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/relevant_segment_extraction.ipynb">Relevant Segment Extraction</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/contextual_compression.ipynb">Contextual Compression</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/explainable_retrieval.ipynb">Explainable Retrieval</a></li>
+</ul>
+</article><nav class="pager" aria-label="篇章导航"><a href="07-query-enhancement.html"><small>上一篇</small>查询增强：用户不一定会说“幂等”</a><a href="09-evaluation.html"><small>下一篇</small>评估：两条高分结果，可能还不够回答</a></nav></main><script src="../assets/wiki.js"></script></body></html>

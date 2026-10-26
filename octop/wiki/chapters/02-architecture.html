@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>总体架构：单进程，不是单模块 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 02</div><div class="rail-title">总体架构：单进程，不是单模块</div><ol><li><a href="#octop-首先是一个宿主">Octop 首先是一个宿主</a></li><li><a href="#四个产品边界">四个产品边界</a></li><li><a href="#为什么不先拆服务">为什么不先拆服务</a></li><li><a href="#postgresql-没有改变进程模型">PostgreSQL 没有改变进程模型</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 02 章</div><h1>总体架构：单进程，不是单模块</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 8 分钟</div></header><div class="prose"><h2 id="octop-首先是一个宿主">Octop 首先是一个宿主<a class="anchor" href="#octop-首先是一个宿主" aria-label="链接到本节">#</a></h2>
+<p>林岚看到的是聊天界面，维护者看到的却是一组持续运行的组件：认证、Agent 注册表、IM 连接、定时任务、消息订阅和数据库。Octop 把它们装进同一个 Python 服务，而不是要求用户先部署消息队列、worker 与独立控制台后端。</p>
+<p>把它归类为“模块化单体”比“聊天机器人”更准确。这是架构分析：它具有多种领域能力和明确的库边界，但核心运行时由一个进程持有。单进程减少部署部件，不会自动减少模块之间的复杂度。</p>
+<pre><code class="language-text">浏览器 Dashboard ── HTTP / WebSocket ─┐
+CLI ── HTTP / WS 或嵌入式运行 ────────┼─ API / Gateway
+IM 通道 ── ChannelManager ───────────┘       │
+定时任务 ── CronManager ─────────────────────┤
+                                           ▼
+                                    GlobalProcessor
+                                           │
+                                      AgentManager
+                                           │
+                                octop-harness 运行时
+                                           │
+                              模型 / 工具 / Memory / 后端
+</code></pre>
+<p>图表示入口汇聚关系，不表示每种 CLI 命令都会经过 HTTP，也不表示每条路径都按图中全部节点逐一调用。</p>
+<h2 id="四个产品边界">四个产品边界<a class="anchor" href="#四个产品边界" aria-label="链接到本节">#</a></h2>
+<p>对外表面包含 Dashboard、Click CLI 和 HTTP/WS API。API 层处理认证、参数、状态码和传输，不应该自行拼装一套与 IM 不同的模型循环。</p>
+<p>宿主业务层位于 infra。这里的 AgentManager 是进程级注册与装配入口；Gateway 连接渠道、线程与消息；CronManager 管理调度；SharedServices 提供仓储与公共服务。文件夹名叫 infra，但其职责不只是数据库驱动，还包括相当多产品逻辑，不能机械套进“纯基础设施层”。</p>
+<p>可复用库承担不同任务。octop-harness 提供 Agent 运行时与工具编排；octop-gateway 提供通道协议；octop-memory 提供记忆能力；octop-browser 提供浏览器相关能力。依赖名可以从 pyproject.toml 核实。详细内部算法需要另读相应库，不能从宿主的 import 推演出全部实现。</p>
+<p>存储层也不是一个部件。控制面记录用户和配置；运行时 checkpoint 保存图状态；工作区承载内容文件；历史与知识索引还有自己的保存形式。这些边界到存储与历史一章再展开。</p>
+<h2 id="为什么不先拆服务">为什么不先拆服务<a class="anchor" href="#为什么不先拆服务" aria-label="链接到本节">#</a></h2>
+<p>ADR 001 给出的背景是自托管用户：安装一个包，初始化，再启动服务。把 Redis、Celery 或单独 worker 设为必需，会把一个人的安装问题变成多服务运维问题。</p>
+<p>Agent 请求经常等待模型、网络或工具返回，异步 I/O 可以在等待期间处理其他请求。这支持单进程选择，但不说明 CPU 密集型 PDF/OCR、向量扫描或同步数据库调用没有成本。事件循环里出现阻塞，仍会影响整个实例。</p>
+<p>另一个好处是对象间可以直接传引用。CronManager 可以得到 Gateway，AgentManager 可以得到仓储与策略，无须再设计远程接口。代价也来自同一点：这些对象、锁和订阅只存在于本进程，多开实例不会自动共享。</p>
+<h2 id="postgresql-没有改变进程模型">PostgreSQL 没有改变进程模型<a class="anchor" href="#postgresql-没有改变进程模型" aria-label="链接到本节">#</a></h2>
+<p>ADR 002 引入可选 PostgreSQL 控制面。它改变的是持久化位置和驱动，不是给所有内存组件提供分布式一致性。文档明确不承诺多实例同时写。</p>
+<p>例如运行两个进程读取同一个 cron 表，每个进程都可能恢复自己的调度器。数据库里只有一条任务，不代表实际只有一个调度所有者。要做横向扩展，需要任务认领、租约、幂等和消息路由，而不只是换连接串。</p>
+<details>
+<summary>源码定位与解释边界</summary>
+
+<p>从 infra/server.py 的 _boot_runtime 开始画对象图，再看 launch.py 如何挂 FastAPI。docs/architecture.md 的全局注册表说明与代码一致。README_CN 的旧树仅作为文档漂移证据，不用来断言当前运行结构。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/architecture.md"><code>docs/architecture.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/adr/001-single-process-model.md"><code>docs/adr/001-single-process-model.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/adr/002-database-backends.md"><code>docs/adr/002-database-backends.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/server.py"><code>src/octop/infra/server.py</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>工作室有 12 位编辑，打算把数据库换成 PostgreSQL，再启动三个相同服务以提高并发。指出两种不能仅靠数据库解决的状态。</p>
+<p><strong>答案提示：</strong> WebSocket 订阅与正在运行的 turn、Cron 调度器、团队在途派工和取消信号都带进程内状态。要先设计所有者与路由；“12 人”本身也不足以证明需要拆分，应测量同时活跃任务及尾延迟。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="01-requirements.html"><small>上一章</small><strong>需求分析：先确定系统要保住什么</strong></a><a class="next" href="03-lifecycle.html"><small>下一章</small><strong>启动与退出：谁把系统装起来</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

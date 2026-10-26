@@ -1,0 +1,66 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>技术方案：从需求推导一条可检查的链路 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="02-architecture"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#把需求映射到模块">把需求映射到模块</a></li><li><a href="#写入链与查询链分开">写入链与查询链分开</a></li><li><a href="#核心对象只保留必要字段">核心对象只保留必要字段</a></li><li><a href="#三种存储方案怎么选">三种存储方案怎么选</a></li><li><a href="#一次请求经过哪些函数">一次请求经过哪些函数</a></li><li><a href="#对应代码">对应代码</a></li></ol></details><article class="content"><h1 id="技术方案-从需求推导一条可检查的链路">技术方案：从需求推导一条可检查的链路</h1><p>需求明确以后，可以决定在哪里处理版本、权限和相关性。最容易出错的方案是先把全部资料搜出来，再让回答模型“注意不要泄露”。这时受限内容已经进入模型输入，过滤位置太晚了。</p>
+<h2 id="把需求映射到模块">把需求映射到模块</h2><table>
+<thead>
+<tr>
+<th>需求</th>
+<th>放在哪里处理</th>
+<th>为什么放在这里</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>引用能回到原文</td>
+<td>入库时保存来源和片段 ID</td>
+<td>生成后无法补回丢失的定位</td>
+</tr>
+<tr>
+<td>默认使用当前规范</td>
+<td>检索前限制版本视图</td>
+<td>排名不能决定规则是否生效</td>
+</tr>
+<tr>
+<td>私人笔记不可越权</td>
+<td>授权候选集合及后续扩展</td>
+<td>不能把相关性当权限</td>
+</tr>
+<tr>
+<td>验签与幂等都要回答</td>
+<td>证据选择和完整性评估</td>
+<td>单条高分不代表证据齐全</td>
+</tr>
+<tr>
+<td>失败可以追踪</td>
+<td>记录候选与最终注入 ID</td>
+<td>区分找不到和交付丢失</td>
+</tr>
+</tbody></table>
+<p>这里的模块是职责边界，不要求独立微服务。只有十份资料时，多个进程、队列和数据库会增加调试负担。单进程先把合同做对，数据量或团队边界发生变化后再拆部署单元。</p>
+<h2 id="写入链与查询链分开">写入链与查询链分开</h2><p>写入链负责解析原文、切块、生成表示、验证索引和发布版本。查询链固定读取一个可用索引快照，执行授权、召回、排序和组装。索引重建失败时，旧快照仍能提供服务；不能让半份新索引对外可见。</p>
+<pre tabindex="0"><code class="hljs">写入链：原文 → 解析与切块 → 表示与索引 → 验证后发布快照
+                                           ↓
+查询链：身份 → 可见集合 → 召回与排序 → 证据包 → 模型回答（可选）</code></pre><p>图中的“模型回答”属于可选接入。配套 CLI 到证据包为止，不会调用远程模型。这样离线测试能把检索问题和生成随机性分开。</p>
+<h2 id="核心对象只保留必要字段">核心对象只保留必要字段</h2><pre tabindex="0"><code class="hljs"><span class="hljs-meta">@dataclass(<span class="hljs-params">frozen=<span class="hljs-literal">True</span></span>)</span>
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">Chunk</span>:
+    <span class="hljs-built_in">id</span>: <span class="hljs-built_in">str</span>
+    doc_id: <span class="hljs-built_in">str</span>
+    version: <span class="hljs-built_in">str</span>
+    position: <span class="hljs-built_in">int</span>
+    text: <span class="hljs-built_in">str</span>
+    source: <span class="hljs-built_in">str</span>
+    scope: <span class="hljs-built_in">str</span> = <span class="hljs-string">&quot;public&quot;</span>
+    active: <span class="hljs-built_in">bool</span> = <span class="hljs-literal">True</span></code></pre><p><code>id</code> 是全局片段身份，<code>position</code> 是文档版本内部顺序。不同检索器可以以不同名次返回同一个 ID；做融合时按 ID 关联。邻域扩展则按文档、版本和位置取原文，不拿搜索名次当段落位置。</p>
+<p><code>frozen=True</code> 防止教学过程中不小心修改对象，但不能替代持久化事务。生产版还可能需要租户、有效区间、解析器版本和内容 hash，是否加入取决于更新与审计要求，不预先为所有可能性建立字段。</p>
+<h2 id="三种存储方案怎么选">三种存储方案怎么选</h2><p>小型实验可以将 JSONL 全部加载进内存，遍历得到可见资料并重新计算分数。它没有额外依赖，也能暴露每一步中间状态，代价是查询开销随资料量增长。</p>
+<p>关系数据库加全文索引适合已有结构化数据、权限和事务需求的团队；向量检索服务适合需要语义召回和近似近邻能力的场景。二者都不能省略原文和访问合同。选哪个实现，并不会自动解决旧版本混入、来源失效和错误合并。</p>
+<p>本书选择第一种来解释机制。不是因为它能扛大流量，而是因为十个片段不需要远程存储。上游的基础示例使用 OpenAI embedding 和 FAISS，适合在独立环境中进一步比较语义检索。</p>
+<h2 id="一次请求经过哪些函数">一次请求经过哪些函数</h2><pre tabindex="0"><code class="hljs">load_chunks → Retriever
+认证身份的教学替身 user → visible
+query → search → [(Chunk, score)]
+候选 → expand → [Chunk]
+片段 → pack_context → (正文, 注入ID)</code></pre><p>过滤在分数计算前发生，扩展时再次限定可见集合。证据打包按字符预算保留完整块，包含来源标签的字符也计入。打包器不判定事实正确，不会凭空补齐被漏召回的片段。</p>
+<p>每一层都要报告自己的失败。解析异常不应产生空文档并假装成功；模型超时不应被解释为资料不存在。该分层让失败能定位到一个具体交接点。</p>
+<h2 id="对应代码">对应代码</h2><ul>
+<li><a href="../../examples/mini_rag.py">mini_rag.py</a>：<code>Chunk</code>、<code>Retriever</code>、<code>pack_context</code></li>
+<li><a href="../../examples/test_mini_rag.py">离线边界测试</a></li>
+</ul>
+<p>真实身份认证、数据库和模型服务不在这份最小实现中。架构图中的职责不等于已经交付的生产模块。</p>
+</article><nav class="pager" aria-label="篇章导航"><a href="01-requirements.html"><small>上一篇</small>需求篇：先确定哪些问题必须答对</a><a href="03-ingestion.html"><small>下一篇</small>资料入库：先把文档读对，再谈检索</a></nav></main><script src="../assets/wiki.js"></script></body></html>

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>架构评价：何时保留单体，何时拆分 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 16</div><div class="rail-title">架构评价：何时保留单体，何时拆分</div><ol><li><a href="#回到开篇的任务">回到开篇的任务</a></li><li><a href="#最值得借鉴的四个选择">最值得借鉴的四个选择</a></li><li><a href="#当前复杂度聚集在哪里">当前复杂度聚集在哪里</a></li><li><a href="#治理顺序比拆分名单重要">治理顺序比拆分名单重要</a></li><li><a href="#什么时候才值得进程外队列">什么时候才值得进程外队列</a></li><li><a href="#从本项目迁移到自己的系统">从本项目迁移到自己的系统</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 16 章</div><h1>架构评价：何时保留单体，何时拆分</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 8 分钟</div></header><div class="prose"><h2 id="回到开篇的任务">回到开篇的任务<a class="anchor" href="#回到开篇的任务" aria-label="链接到本节">#</a></h2>
+<p>现在可以沿完整链路复述林岚的请求：认证用户选择一位可访问的专家，当前入口绑定自己的线程；附件成为工作区引用，知识检索在可见集合里找证据；宿主组装模型与工具能力，运行库执行；高风险动作进入审批；成员专家各自工作后向房间回传；流式帧、历史、checkpoint 与长期记忆按不同职责保存。</p>
+<p>这条链路的价值不是让所有组件看起来一致，而是让不同职责的交接可核对。Octop 的架构重点正是这些交接，而不是“套了一个模型 SDK”。</p>
+<h2 id="最值得借鉴的四个选择">最值得借鉴的四个选择<a class="anchor" href="#最值得借鉴的四个选择" aria-label="链接到本节">#</a></h2>
+<p>第一，围绕自托管约束保留单进程核心。部署简单是面向目标用户的产品价值，不是必须被微服务纠正的技术落后。</p>
+<p>第二，让多入口共用运行时能力。Web、CLI、IM、cron 尽可能回到共同消息与处理边界，减少各自维护一套提示、历史和审批逻辑的风险。</p>
+<p>第三，工作区后端与控制面分开。配置存在哪个数据库，不应决定每一份专家文件只能放在哪里。这个分离给对象存储和沙箱适配留下空间。</p>
+<p>第四，团队共享展示但隔离状态。成员不写同一份 checkpoint，能保留各自工作区与记忆，也让说话人和任务归属有明确表达。</p>
+<p>这些是架构分析，不是基准测试结论。</p>
+<h2 id="当前复杂度聚集在哪里">当前复杂度聚集在哪里<a class="anchor" href="#当前复杂度聚集在哪里" aria-label="链接到本节">#</a></h2>
+<p>AgentManager 与 GlobalProcessor 承担大量配置与生命周期职责，前端 chatStore 也很大。大文件不是自动的缺陷，却说明变更需要同时理解多个契约：普通聊天、团队、HITL、历史、远端桥接与配置兼容。</p>
+<p>文档也存在可观察的漂移：README 与当前全局结构不一致，旧 inbox 方案与新团队契约并存，Bridge 部分规划文件名已变化。系统演进时，应把“版本、事实来源与非目标”写在文档里，避免旧设计被误当现行实现。</p>
+<p>存储则呈现多层化。它提高局部能力，但会把一致性和恢复问题交给宿主。尤其是新历史归档与旧 checkpoint 并存时，必须明确哪些状态可恢复、哪些只是可展示。</p>
+<h2 id="治理顺序比拆分名单重要">治理顺序比拆分名单重要<a class="anchor" href="#治理顺序比拆分名单重要" aria-label="链接到本节">#</a></h2>
+<p>建议先做三件小事：</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>改造</th>
+<th>解决的压力</th>
+<th>验收方式</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>固化请求与事件契约</td>
+<td>多入口、团队与前端解释不一致</td>
+<td>相同事件轨迹在多个入口断言一致</td>
+</tr>
+<tr>
+<td>分开配置解析与生命周期</td>
+<td>改一个能力牵动全部装配</td>
+<td>已解析输入到有效配置的快照测试</td>
+</tr>
+<tr>
+<td>建立恢复与负面测试矩阵</td>
+<td>正常路径可用但故障语义含糊</td>
+<td>故障点、落盘状态与外部动作记录</td>
+</tr>
+</tbody></table></div>
+<p>然后再根据测量决定隔离 CPU 任务、改善索引、减少数据库阻塞或拆分 worker。不要在没有瓶颈证据时，先引入消息队列和分布式事务，反而破坏项目最重要的安装优势。</p>
+<h2 id="什么时候才值得进程外队列">什么时候才值得进程外队列<a class="anchor" href="#什么时候才值得进程外队列" aria-label="链接到本节">#</a></h2>
+<p>若出现大量长任务、必须跨重启保留派工、需要独立扩容执行器，或故障必须隔离到不同执行单元，进程外队列才有明确收益。</p>
+<p>但队列并非多加一个组件就结束。至少要设计持久 job ID、任务认领、租约与 fencing、重试分类、幂等副作用、取消传播、结果归档、WS 路由和配置快照。PG 只是其中可能使用的基础设施，不是这些契约的替代品。</p>
+<p>第一版可以只把昂贵文档解析移到独立受控执行器，而不拆用户、专家、权限等所有模块。边界应跟随负载和所有权，不跟随文件夹数量。</p>
+<h2 id="从本项目迁移到自己的系统">从本项目迁移到自己的系统<a class="anchor" href="#从本项目迁移到自己的系统" aria-label="链接到本节">#</a></h2>
+<p>如果你要做小团队 Agent 平台，先保留三个不变量：身份来自认证而不是模型，外部动作在工具边界授权，恢复能力按具体状态和故障点描述。再考虑功能堆叠。</p>
+<p>不必完整复制 MBTI、市场、远程桌面或全部渠道。先跑通一次任务的来源、能力、状态、审批与归档，就能建立后续扩展需要的骨架。SAM 系列从需求推进到实现的组织方式适合用来检查这条骨架，但真实技术选择仍由你的业务约束决定。</p>
+<details>
+<summary>一句话的结论及其适用范围</summary>
+
+<p>Octop 是围绕自托管体验构建的 Agent 产品宿主，其优势在多入口、多能力的统一装配，主要演进压力在运行时编排、状态一致性与故障边界。该判断只针对本书固定快照，不代表对后续版本的持续评审。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/adr/001-single-process-model.md"><code>docs/adr/001-single-process-model.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/adr/002-database-backends.md"><code>docs/adr/002-database-backends.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/manager.py"><code>src/octop/infra/agents/manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/gateway/process/processor.py"><code>src/octop/infra/gateway/process/processor.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/pages/Chat/hooks/chatStore.ts"><code>dashboard/src/pages/Chat/hooks/chatStore.ts</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>团队提出三个目标：十倍用户、持久任务、模型回答更准确。为什么不能统一归结成“拆成微服务”？</p>
+<p><strong>答案提示：</strong> 十倍用户要先量活跃负载；持久任务需要任务协议和恢复设计；回答准确性要分材料、召回、提示与模型能力。三个目标的瓶颈可能不在同一层，微服务也不会自动解决它们。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="15-operations.html"><small>上一章</small><strong>部署与验证：把恢复当成一项功能</strong></a><a class="next" href="17-mini-host.html"><small>下一章</small><strong>代码实战：用最小宿主验证四条边界</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

@@ -1,0 +1,27 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>纠错检索：找不到以后，系统走哪一条路 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="10-corrective"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#把相关性与充分性分开">把相关性与充分性分开</a></li><li><a href="#self-rag-的两层含义">Self-RAG 的两层含义</a></li><li><a href="#crag-把检索失败变成分支">CRAG 把检索失败变成分支</a></li><li><a href="#企业规范不应默认上网补齐">企业规范不应默认上网补齐</a></li><li><a href="#adaptive-retrieval-怎样避免过度调用">Adaptive Retrieval 怎样避免过度调用</a></li><li><a href="#对应资料">对应资料</a></li></ol></details><article class="content"><h1 id="纠错检索-找不到以后-系统走哪一条路">纠错检索：找不到以后，系统走哪一条路</h1><p>研发问“退款超时能否直接再发一次”，召回结果里只有支付成功通知。一个危险的兜底方式是继续调用模型，让它凭已有知识凑出答案。对于当前公司规则，这种行为可能比明确说资料不足更糟。</p>
+<h2 id="把相关性与充分性分开">把相关性与充分性分开</h2><p>一段话谈退款，属于相关；它明确说明超时后先查询渠道，再决定是否重试，才可能支持当前问题。另一段只解释退款单字段，也相关，却不足以回答操作顺序。</p>
+<p>可以为候选增加相关性检查，为最终证据增加支持性检查。评分器返回的数字不是天然校准概率。尤其由提示要求模型“打 0 到 1 分”时，0.8 与真实正确率 80% 没有自动对应关系。</p>
+<h2 id="self-rag-的两层含义">Self-RAG 的两层含义</h2><p>Self-RAG 的思想是按需检索，并对材料与回答进行反思。原论文涉及训练后的反思 token。上游教程用多个提示调用演示检索决策、文档相关性、回答生成、支持性与效用评分，不等于复现原论文的训练过程。</p>
+<p>教程还有一个值得读的分支：没有相关上下文时，转为无检索生成。这对开放知识问题可能有用，但与本书“内部规范必须有证据”的目标不一致。我们的业务策略应改为返回材料不足，或者在获准后继续查找，而不是把无证据回答标成可靠结果。</p>
+<p>即使支持检查说“部分支持”，教程的结果选择也不等于严格拒绝所有不受支持回答。应用仍需定义何时允许交付，不能让方法名称代替验收条件。</p>
+<h2 id="crag-把检索失败变成分支">CRAG 把检索失败变成分支</h2><p>CRAG 根据检索质量选择继续用本地资料、补充检索或组合多个来源。上游演示使用模型评价、知识提炼、查询改写和网络搜索，并用示例阈值划分分支。</p>
+<p>本书可以把控制过程写为接口级伪代码：</p>
+<pre tabindex="0"><code class="hljs"><span class="hljs-keyword">for</span> attempt <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(max_attempts):
+    evidence = retrieve(query, authorized_scope)
+    <span class="hljs-keyword">if</span> sufficient(evidence, original_question):
+        <span class="hljs-keyword">return</span> grounded_answer(evidence)
+    query = revise_query(original_question, evidence)
+<span class="hljs-keyword">return</span> insufficient_evidence()</code></pre><p>这些函数没有在离线程序中定义，表示未来接入边界。授权范围固定来自应用，不随改写扩大。达到次数、时间或费用上限就终止，不无限递归寻找“满意答案”。</p>
+<h2 id="企业规范不应默认上网补齐">企业规范不应默认上网补齐</h2><p>网络可以补充公开 SDK 说明，不能证明公司的内部回调处理约定。把内部商户、故障细节直接发到搜索引擎还可能泄露资料。是否允许外部搜索，应该由数据分类和产品需求决定。</p>
+<p>如果问题是公开协议，使用官方来源并标明来源时间；如果问题是“我们系统现在怎么做”，优先找内部当前文档或授权代码。两类来源冲突时，应展示冲突和适用范围，不让模型选择听起来更专业的一方。</p>
+<h2 id="adaptive-retrieval-怎样避免过度调用">Adaptive Retrieval 怎样避免过度调用</h2><p>可以先按任务区分：精确接口查找走关键词，概念解释走语义召回，当前交易状态走业务工具，跨材料职责查找走受控二次检索。分类也会犯错，因此要记录实际路线并保留手动切换入口。</p>
+<p>反馈循环适合收集漏召回与错误引用。一次点赞不能证明原文真实，一次失败也不能直接删除规范。先区分反馈针对检索、回答还是文档内容，再决定修改哪一层。</p>
+<h2 id="对应资料">对应资料</h2><ul>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/self_rag.ipynb">Self-RAG 教程</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/crag.ipynb">CRAG 教程</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/adaptive_retrieval.ipynb">Adaptive Retrieval</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/retrieval_with_feedback_loop.ipynb">反馈循环</a></li>
+<li><a href="https://arxiv.org/abs/2310.11511">Self-RAG 论文</a></li>
+<li><a href="https://arxiv.org/abs/2401.15884">CRAG 论文</a></li>
+</ul>
+</article><nav class="pager" aria-label="篇章导航"><a href="09-evaluation.html"><small>上一篇</small>评估：两条高分结果，可能还不够回答</a><a href="11-hierarchy-memory.html"><small>下一篇</small>层次索引与记忆：问题开始面向整份资料</a></nav></main><script src="../assets/wiki.js"></script></body></html>

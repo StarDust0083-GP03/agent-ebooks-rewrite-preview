@@ -1,27 +1,33 @@
-# Agent 电子书重构预览
+# Agent 工程书架
 
-四本中文电子书 `rewrite/agent-ebooks` 分支，加上 Pi Code Mode 架构书的集中静态预览。与各仓库 `main` 的正式 Pages 分开，不覆盖现有发布。
+七本中文电子书的独立预览站，不覆盖各原仓库的正式 Pages。
 
-- 入口：<https://stardust0083-gp03.github.io/agent-ebooks-rewrite-preview/>
-- 分支：`rewrite/agent-ebooks`
+阅读入口：https://stardust0083-gp03.github.io/agent-ebooks-rewrite-preview/
 
-| 书 | 路径 | 本地克隆 |
-| --- | --- | --- |
-| AI 工程师：从原理到实践 | `ai-engineer/` | `../AI-Engineer-from-scrach` |
-| Agent Memory from Scratch | `agent-memory/` | `../agent-memory-from-scratch` |
-| AI Infra from Scratch | `ai-infra/` | `../ai-infra-from-scratch` |
-| LangChain × LangGraph | `langchain-langgraph/` | `../langchain-langgraph-from-scratch` |
-| Pi：从工具循环到 Code Mode | `pi-code-mode/` | `../pi-mono-evolution` |
+| 书 | 入口 |
+| --- | --- |
+| AI 工程师：从原理到实践 | `ai-engineer/index.html` |
+| Agent Memory from Scratch | `agent-memory/index.html` |
+| AI Infra from Scratch | `ai-infra/index.html` |
+| LangChain × LangGraph | `langchain-langgraph/index.html` |
+| Pi：从工具循环到 Code Mode | `pi-code-mode/index.html` |
+| RAG 工程实战 | `rag/wiki/index.html` |
+| Octop 架构解剖 | `octop/wiki/index.html` |
 
-`preview.json` 记录各分支的提交。AI 工程师阅读本原有的 163 个仓库根目录素材链接在部署时改写为该分支的 GitHub 源码地址；其余三本保留构建器生成的站内链接和上游固定提交链接。Pi 书的网页、PDF、EPUB、Markdown 和 12 张 SVG 均从本地构建产物复制，源链接固定到 `pi-mono-architecture-book` 仓库。
+## 阅读器
 
-## 检查
+保留正文及各书配色，改进阅读栏宽、标题层级、手机目录、当前章节定位、代码与表格横向滚动、三态外观和键盘焦点。代码复制受浏览器限制时会选中文本，供手动复制。样式与脚本随书分发，合订本保留内嵌资源，不依赖外部 CDN。
 
-- 本地服务器检查 263 个内部 URL，0 个 404 或缺失锚点。
-- 桌面和移动布局检查；五本目录页、三个合订本、搜索页与 Pi 的 PDF/EPUB 可打开。
-- 四套书均已重新构建，新增 16 幅正文内嵌图解：AI Engineer 3 幅、Agent Memory 2 幅、AI Infra 4 幅、LangChain / LangGraph 7 幅。Pi 书更新至 v1.4.0，包含 12 章、12 张架构图、29 条固定来源与 49 页 PDF。
-- 修复 AI Infra 与 LangChain / LangGraph 合订本的重复锚点，补充内嵌 SVG 无障碍引用校验。
-- 四套阅读产物校验通过；Agent Memory 的 24 项示例测试、AI Infra 离线检查及标准库 Agent 示例通过。
-- LangGraph 审批示例测试因当前 Python 缺少 `langgraph` 而受阻，未执行真实模型、MCP、GPU 或持久数据库集成测试。
+Octop 提供分章网页、单文件合订本、Markdown、PDF 与 EPUB。内容依据官方提交 `890111b7879665840414ca28ab168b05b0db0921`，参考 SAM 系列的需求驱动讲解方法；不是官方文档，也不是生产压测或安全审计。RAG 与 Octop 的“源码”链接指向被分析的上游项目，而非书稿仓库。
 
-四套书的构建产物从对应分支的 `ebook/` 或 `wiki/` 同步，再使用上一级 `prepare_preview.py` 的链接改写和目录生成函数整理。`preview.json` 记录本次构建时间、源码提交和新增图数量；未覆盖四个原仓库的正式 Pages。
+## 构建与发布
+
+本目录只包含可公开的阅读产物、少量原创教学代码和清单。不包含第三方仓库克隆、凭证、虚拟环境、全文研究归档和依赖缓存。
+
+对应本地书稿构建完成后，由上级 `prepare_preview.py` 按白名单复制阅读资源并改写链接。Pi 的构建器将阅读样式与交互内嵌到 HTML；AI Engineer 和 RAG 的离线合订本也需在修改阅读资源后重新构建，不能只更新外链 CSS。
+
+GitHub Pages 从本仓库 `main` 的根目录发布。部署前检查内部 URL、锚点和桌面/平板/手机布局，推送后等待 Pages 构建成功并核验线上入口与下载文件。各原始书稿工作区中的改动不自动等于其正式 Pages 已更新。
+
+## 本次验证
+
+2026-10-27：七本的 390、834、1440px 布局检查；搜索及复制受限回退检查；321 个内部 URL 与锚点检查通过。电子书项目自带的结构校验通过；离线教学程序不代表真实模型、MCP、云服务或硬件验收。Impeccable 对本次共享样式与交互代码的静态扫描未报告问题，不以此代替浏览器检查。

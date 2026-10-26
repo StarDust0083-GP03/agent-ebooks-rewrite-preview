@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>部署与验证：把恢复当成一项功能 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 15</div><div class="rail-title">部署与验证：把恢复当成一项功能</div><ol><li><a href="#一个核心服务-不等于没有其他进程">一个核心服务，不等于没有其他进程</a></li><li><a href="#定时任务为何也是主链路的一部分">定时任务为何也是主链路的一部分</a></li><li><a href="#备份必须匹配真实数据布局">备份必须匹配真实数据布局</a></li><li><a href="#按风险层次读测试">按风险层次读测试</a></li><li><a href="#用六次故障推演替代一句-支持高可用">用六次故障推演替代一句“支持高可用”</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 15 章</div><h1>部署与验证：把恢复当成一项功能</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 10 分钟</div></header><div class="prose"><h2 id="一个核心服务-不等于没有其他进程">一个核心服务，不等于没有其他进程<a class="anchor" href="#一个核心服务-不等于没有其他进程" aria-label="链接到本节">#</a></h2>
+<p>Octop 的单进程模型描述的是核心宿主。模型服务可以在外部，工具可以拉起子进程，浏览器有自己的进程，Docker 后端也有执行环境。不要把“单进程”写成操作系统里永远只有一个 PID。</p>
+<p>wheel 可以带构建后的 Dashboard；开发时 Vite 与 Python 分开运行，发布时静态资源进入 src/octop/dashboard。Docker 则把这些内容和运行环境一起打包，数据目录仍要持久挂载。</p>
+<p>desktop/README.md 明确当前桌面壳为 Wails v3，加载打包的 portable runtime，启动 Octop。它与 infra/control/desktop 远程桌面流不是一个模块；仓库残留 Electron 说明也不是当前桌面壳技术栈的证据。</p>
+<h2 id="定时任务为何也是主链路的一部分">定时任务为何也是主链路的一部分<a class="anchor" href="#定时任务为何也是主链路的一部分" aria-label="链接到本节">#</a></h2>
+<p>CronManager 是进程级 APScheduler 管理器，从数据库记录恢复任务。CronJob 把任务交给 CronDeliveryService，并记录运行状态、审计与指标。</p>
+<p>task_type 区分直接推文本和运行 Agent 后投递。两者的成本、失败点与权限需求不同。林岚每天收到固定提醒，不一定要花一次模型调用；每天基于新资料生成简报，才需要实际 Agent 处理。</p>
+<p>cron 的运行状态 ok 至少表示当前投递流程按其契约成功返回，不自动表示每个外部收件人已经阅读，也不构成所有下游副作用的事务证明。</p>
+<p>多进程恢复相同任务时的所有权问题，在这里比“有没有换成 PG”更关键。</p>
+<h2 id="备份必须匹配真实数据布局">备份必须匹配真实数据布局<a class="anchor" href="#备份必须匹配真实数据布局" aria-label="链接到本节">#</a></h2>
+<p>基础清单应包含配置、主库、秘密材料、Agent 工作区、checkpoint、Memory、知识文件与索引，以及启用时的历史归档和标记。秘密材料要按其恢复依赖安全保存，不能把它们随便打进公开样例。</p>
+<p>SQLite 运行中的一致快照不等于复制一个正在写的文件；PostgreSQL 有自己的 pg_dump 路径。ADR 002 不承诺跨引擎恢复。history_v2 的多库协调与路径身份限制则需要额外遵守。</p>
+<p>“能导出一份聊天 JSON”和“灾后能恢复整个服务”是两个验收项目。前者帮助核对记录，后者还需要身份、配置、图状态、文件与依赖版本匹配。</p>
+<h2 id="按风险层次读测试">按风险层次读测试<a class="anchor" href="#按风险层次读测试" aria-label="链接到本节">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>测试层</th>
+<th>可以验证</th>
+<th>不能单独证明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>纯逻辑单测</td>
+<td>路由、标识、状态合并、参数规则</td>
+<td>真实模型与外部服务</td>
+</tr>
+<tr>
+<td>API 集成测试</td>
+<td>认证、资源边界、WS 与服务生命周期</td>
+<td>全部部署环境</td>
+</tr>
+<tr>
+<td>PostgreSQL 专项</td>
+<td>迁移、仓储、checkpoint 等兼容路径</td>
+<td>不依赖本地 sidecar</td>
+</tr>
+<tr>
+<td>live 测试</td>
+<td>特定凭证与供应商的真实交互</td>
+<td>所有供应商与所有权限</td>
+</tr>
+<tr>
+<td>恢复演练</td>
+<td>指定故障点下的恢复结果</td>
+<td>未测试故障和硬件损坏</td>
+</tr>
+</tbody></table></div>
+<p>仓库有 unit 与 integration，并用 marker 控制 live、slow、postgresql 等范围。缺凭证的测试可能跳过。CI 绿灯因此要结合实际执行矩阵理解，不应写成所有真实服务都已验收。</p>
+<p>本次只对电子书构建与配套教学模型运行检查，没有运行 Octop 自身测试。</p>
+<h2 id="用六次故障推演替代一句-支持高可用">用六次故障推演替代一句“支持高可用”<a class="anchor" href="#用六次故障推演替代一句-支持高可用" aria-label="链接到本节">#</a></h2>
+<p>在隔离测试副本中依次验证：</p>
+<ol>
+<li>模型在工具调用前失败，历史和 UI 如何结束。</li>
+<li>工具动作成功但返回超时，重试是否重复副作用。</li>
+<li>客户端断线后重连，后续帧和历史是否一致。</li>
+<li>审批暂停时退出，再启动后待处理动作是否可识别。</li>
+<li>写入历史时磁盘满，是否仍向用户宣称成功。</li>
+<li>从完整备份恢复，线程、附件、记忆和配置是否能关联。</li>
+</ol>
+<p>这套清单没有预设系统应通过所有项目，而是要求把实际结果写下来。有的能力当前不支持，明确限制比伪装成自动恢复更安全。</p>
+<details>
+<summary>上线前先保住哪个指标</summary>
+
+<p>先量事件循环延迟、活跃 turn、模型与工具耗时、历史提交延迟、数据库锁等待、重连次数与失败率。注册用户数不能代表同时执行压力，模型 token 速率也不能替代整体请求尾延迟。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/desktop/README.md"><code>desktop/README.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docker/docker-compose.yml"><code>docker/docker-compose.yml</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/Makefile"><code>Makefile</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/.github/workflows/ci.yml"><code>.github/workflows/ci.yml</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/cron/manager.py"><code>src/octop/infra/cron/manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/cron/job.py"><code>src/octop/infra/cron/job.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/versioned-history.md"><code>docs/versioned-history.md</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>工作室每晚备份 octop.db，其他目录不备份。某天服务器故障，恢复后用户和专家列表还在，但附件和记忆缺失。这能算备份成功吗？</p>
+<p><strong>答案提示：</strong> 只能说部分控制面恢复了，业务恢复目标未满足。应先按数据类别定义 RPO/RTO 与恢复验收，再制定完整备份方案；不能用主库文件存在代替可用性检查。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="14-interop.html"><small>上一章</small><strong>跨端协作：ACP 与 Bridge 各管什么</strong></a><a class="next" href="16-tradeoffs.html"><small>下一章</small><strong>架构评价：何时保留单体，何时拆分</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

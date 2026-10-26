@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>前端架构：流式对话是一台状态机 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 13</div><div class="rail-title">前端架构：流式对话是一台状态机</div><ol><li><a href="#页面不是一份-messages-数组">页面不是一份 messages 数组</a></li><li><a href="#为什么-chatstore-放在组件之外">为什么 chatStore 放在组件之外</a></li><li><a href="#消息属于线程-也属于说话人">消息属于线程，也属于说话人</a></li><li><a href="#四个恢复判断各有用途">四个恢复判断各有用途</a></li><li><a href="#历史回填会与实时增量竞争">历史回填会与实时增量竞争</a></li><li><a href="#测试要抓事件顺序">测试要抓事件顺序</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 13 章</div><h1>前端架构：流式对话是一台状态机</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 10 分钟</div></header><div class="prose"><h2 id="页面不是一份-messages-数组">页面不是一份 messages 数组<a class="anchor" href="#页面不是一份-messages-数组" aria-label="链接到本节">#</a></h2>
+<p>浏览器要同时表达正文增量、思考、工具调用、工具结果、附件、配额、审批暂停、错误、取消和多人说话。简单“收到 token 就拼字符串，收到 done 就解锁”无法覆盖这些状态。</p>
+<p>Dashboard 使用 React、TypeScript、Vite、Ant Design 等组件。理解聊天架构的关键不是组件树有多少层，而是流状态由谁持有、消息怎样归属、历史如何与实时数据合并。</p>
+<h2 id="为什么-chatstore-放在组件之外">为什么 chatStore 放在组件之外<a class="anchor" href="#为什么-chatstore-放在组件之外" aria-label="链接到本节">#</a></h2>
+<p>chatStore.ts 文件开头说明：WebSocket 与累计消息置于模块级 store，在 React 组件卸载、重挂载后仍存在；组件通过快照订阅更新。</p>
+<p>这解决一个具体问题：林岚切到设置页，聊天组件卸载，不应让在途任务的客户端状态立即丢失。回到聊天时可接上最新快照。</p>
+<p>这里“持久”仅相对于页面组件生命周期，不等于浏览器关闭或服务端重启后的持久存储。真正刷新需要结合服务端历史和 turn_active 等状态恢复。不要把内存 store 的名称解释成磁盘数据库。</p>
+<h2 id="消息属于线程-也属于说话人">消息属于线程，也属于说话人<a class="anchor" href="#消息属于线程-也属于说话人" aria-label="链接到本节">#</a></h2>
+<p>parseHarnessChunk 将服务端帧转换为前端可理解事件。frameThread 等逻辑判断帧属于哪个线程；团队流还要依据 agent 标记和说话人规则合并气泡。</p>
+<p>如果研究成员的 token 到来时，前端把它接到主持人的最后一条气泡里，文字可能完全正确，身份仍是错误的。若又把成员 done 当作整个房间结束，主持人总结尚未出现，输入框就可能进入错误状态。</p>
+<p>所以“一个 WS 连接”不等于“一位说话人”或“一轮唯一完成事件”。同房间多任务是前端状态机复杂度的重要来源。</p>
+<h2 id="四个恢复判断各有用途">四个恢复判断各有用途<a class="anchor" href="#四个恢复判断各有用途" aria-label="链接到本节">#</a></h2>
+<p>wsResumeGate.ts 明确把弱恢复与滚动/历史交互分开。当前默认最多自动重新订阅 8 次，无 socket 的陈旧流宽限为 20 秒。这是产品启发式，不是网络可用性 SLA。</p>
+<p>它还规定：是否探测活动任务，依据本地流状态或服务端 turn_active，而不是从最后一条消息长得像不像“没说完”猜测。长工具调用可能很久没有 token，socket 仍开着，不应只因沉默就强制封口。</p>
+<p>后台未聚焦线程也有不同恢复策略，避免大量标签同时重连。一个等待图标看似简单，背后实际包含活跃状态、连接状态与用户焦点三条维度。</p>
+<h2 id="历史回填会与实时增量竞争">历史回填会与实时增量竞争<a class="anchor" href="#历史回填会与实时增量竞争" aria-label="链接到本节">#</a></h2>
+<p>假设历史接口刚开始读取时包含 20 条消息，网络返回前又收到新的流式内容。若直接 setMessages(history)，就可能覆盖这段新文本。</p>
+<p>相反，如果把历史和当前列表无条件拼接，又可能重复展示同一条工具结果。正确做法需要稳定身份、去重、边界或明确的刷新约束。chatStore 中的历史、绘制、团队流、pending alias 与错误测试，正是在约束这些具体情形。</p>
+<p>v2 分页要求原样携带 next_cursor，不能根据新消息数量变化用 offset 自行换算。前端分页协议属于历史一致性设计，不是纯 UI 实现细节。</p>
+<h2 id="测试要抓事件顺序">测试要抓事件顺序<a class="anchor" href="#测试要抓事件顺序" aria-label="链接到本节">#</a></h2>
+<p>一个有价值的前端测试不是只断言“渲染了某段文字”，而是依次注入 token、tool_call、断线、恢复、tool_result、done，再检查归属、状态和结果。</p>
+<p>也可以测试：审批暂停时刷新历史、成员结束但主持人未结束、历史读取失败但旧内容还在、取消以后收到迟到帧。事件顺序一换，最终静态截图相同，也可能隐藏状态错误。</p>
+<p>这些测试可以离线控制输入，不能替代真实浏览器与后端的联调。本书没有执行 Octop Dashboard 的完整测试。</p>
+<details>
+<summary>从文件名回到事实</summary>
+
+<p>sseHelpers.ts 这样的历史命名仍被聊天 store 使用，但普通聊天连接实际由 WebSocket 构造。读代码时看连接创建、订阅及帧处理，不因 helper 名称就把主流程写成 SSE。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/package.json"><code>dashboard/package.json</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/pages/Chat/hooks/chatStore.ts"><code>dashboard/src/pages/Chat/hooks/chatStore.ts</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/pages/Chat/hooks/wsResumeGate.ts"><code>dashboard/src/pages/Chat/hooks/wsResumeGate.ts</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/pages/Chat/hooks/frameThread.ts"><code>dashboard/src/pages/Chat/hooks/frameThread.ts</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/utils/parseHarnessChunk.ts"><code>dashboard/src/utils/parseHarnessChunk.ts</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/pages/Chat/hooks/chatStore.history.test.ts"><code>dashboard/src/pages/Chat/hooks/chatStore.history.test.ts</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>有人建议“20 秒没有 token 就结束加载，防止界面卡住”。为什么这会误伤正常任务？</p>
+<p><strong>答案提示：</strong> 可能正在等待工具、思考或审批。需要结合 socket、服务端 turn 状态和恢复策略；宽限逻辑不能把活连接上的安静任务直接视为完成，更不能把超时封口记成业务成功。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="12-security.html"><small>上一章</small><strong>安全边界：能聊天不等于能管理</strong></a><a class="next" href="14-interop.html"><small>下一章</small><strong>跨端协作：ACP 与 Bridge 各管什么</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

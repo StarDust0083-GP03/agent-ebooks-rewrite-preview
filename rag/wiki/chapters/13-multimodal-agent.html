@@ -1,0 +1,22 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>多模态与 Agent：处理更复杂的资料和任务 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="13-multimodal-agent"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#图片描述与页面图像检索">图片描述与页面图像检索</a></li><li><a href="#多模态引用要能定位到区域">多模态引用要能定位到区域</a></li><li><a href="#agent-增加了哪些选择">Agent 增加了哪些选择</a></li><li><a href="#停止条件由谁控制">停止条件由谁控制</a></li><li><a href="#哪些任务不值得上-agent">哪些任务不值得上 Agent</a></li><li><a href="#对应资料">对应资料</a></li></ol></details><article class="content"><h1 id="多模态与-agent-处理更复杂的资料和任务">多模态与 Agent：处理更复杂的资料和任务</h1><p>支付接入规范可能是一份 PDF，关键限制写在时序图上；故障复盘可能放在 PPT，结论依赖趋势图。文本抽取已经丢了图意，再改查询也找不回来。另一类复杂性来自任务：用户要比较多份规范，再定位负责人，可能需要多轮读取。</p>
+<p>这两类问题分别属于资料表示和任务控制，不必打包成一个“全能 Agent”才能解决。</p>
+<h2 id="图片描述与页面图像检索">图片描述与页面图像检索</h2><p>Captioning 路线先为图表生成文字描述，再用文本索引检索。优点是能沿用现有流程，代价是描述可能漏掉坐标、单位、图例和细小限定。回答精确数值时，应保留原图并核对，不拿概括文字代替视觉证据。</p>
+<p>页面图像检索把页面转换成可检索的视觉表示，命中后交给视觉语言模型读取。ColPali 相关路线属于这一方向。它可以保留版式与视觉关系，也增加页面渲染、图像索引、读取与存储成本。</p>
+<p>上游分别提供 Captioning 和 ColPali 示例入口。方法机制和服务封装应区分：调用一个托管检索接口，不意味着本地已经部署完整模型或复现训练过程。</p>
+<h2 id="多模态引用要能定位到区域">多模态引用要能定位到区域</h2><p>文本引用可以落到段落，图表引用还需要页码和区域。用户问金额上限，回答若只链接整份几十页文档，仍然难以验证。保存渲染版本、页面 ID、区域坐标及原图关系，才能在界面上高亮依据。</p>
+<p>截图中的按钮文案不代表按钮已执行；监控图中的下降也不自动证明某个变更是原因。视觉模型同样需要区分观察与推断。将时序图箭头识别错，可能把回调处理顺序整个颠倒。</p>
+<h2 id="agent-增加了哪些选择">Agent 增加了哪些选择</h2><p>固定流水线由代码决定搜索一次、重排一次、回答一次。Agent 则可以选择工具、追加查询、拆任务或决定继续读取。它扩展了处理复杂问题的空间，也引入提前停止、工具误选和重复搜索。</p>
+<p>以负责人问题为例，允许的操作可以仅限于搜索模块、读取归属、搜索团队和读取职责。工具参数采用可校验结构，响应返回稳定来源。不给它退款或发货权限，也不允许模型自行切换用户身份。</p>
+<p>上游 Agentic RAG 使用 Contextual AI 托管平台，不能误认为所有能力都在同一套本地 Notebook 环境中。Controllable Agent 则是单独仓库的高级案例，需另查依赖与许可。</p>
+<h2 id="停止条件由谁控制">停止条件由谁控制</h2><p>模型认为“还需要查一下”时，应用仍应检查调用次数、时间、费用和权限。模型重复同一查询没有新增证据，就可以终止并返回已知与未知内容。没有明确上限的重规划循环，会把简单查询变成不可预期的任务。</p>
+<p>对外展示“规划中”也不能替代进度记录。至少保存每次检索的目标、使用工具、返回 ID 和最终采用的依据，区分“找到了但没用”和“根本没找到”。</p>
+<h2 id="哪些任务不值得上-agent">哪些任务不值得上 Agent</h2><p>查单个配置、按字段计数、检查某笔交易状态，通常有更确定的查询或业务接口。让 Agent 先推理该调哪条接口，会额外增加延迟和失误。若任务步骤稳定，普通函数或显式状态机更容易测试。</p>
+<p>需要比较十份文档、发现中间缺失资料、反复调整检索路线时，再拿受控 Agent 与固定流程比较。收益应体现在同一任务完成率、证据质量和成本上，而不只是执行轨迹更长。</p>
+<h2 id="对应资料">对应资料</h2><p>本章介绍扩展路线，未在本书标准库实验中实现。</p>
+<ul>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/multi_model_rag_with_captioning.ipynb">多媒体 Captioning</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/multi_model_rag_with_colpali.ipynb">ColPali 示例</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/Agentic_RAG.ipynb">Agentic RAG</a></li>
+<li><a href="https://github.com/NirDiamant/Controllable-RAG-Agent">Controllable RAG Agent</a></li>
+</ul>
+</article><nav class="pager" aria-label="篇章导航"><a href="12-graph.html"><small>上一篇</small>图谱检索：从模块一路找到负责人</a><a href="14-production.html"><small>下一篇</small>上线边界：更新、权限和故障不能靠提示词兜底</a></nav></main><script src="../assets/wiki.js"></script></body></html>

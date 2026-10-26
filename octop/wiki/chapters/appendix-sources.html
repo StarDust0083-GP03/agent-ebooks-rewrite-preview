@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>附录：源码索引、术语与核验路线 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Appendix</div><div class="rail-title">附录：源码索引、术语与核验路线</div><ol><li><a href="#快照信息">快照信息</a></li><li><a href="#术语速查">术语速查</a></li><li><a href="#先读哪五组材料">先读哪五组材料</a></li><li><a href="#按章节核验源码">按章节核验源码</a></li><li><a href="#参考本地-sam-系列的方法">参考本地 SAM 系列的方法</a></li><li><a href="#本书与原项目的权利说明">本书与原项目的权利说明</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">附录 A</div><h1>附录：源码索引、术语与核验路线</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 22 分钟</div></header><div class="prose"><h2 id="快照信息">快照信息<a class="anchor" href="#快照信息" aria-label="链接到本节">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>官方仓库</td>
+<td><a href="https://github.com/TencentCloud/Octop">https://github.com/TencentCloud/Octop</a></td>
+</tr>
+<tr>
+<td>完整提交</td>
+<td><code>890111b7879665840414ca28ab168b05b0db0921</code></td>
+</tr>
+<tr>
+<td>包版本</td>
+<td><code>1.0.3b1</code></td>
+</tr>
+<tr>
+<td>采集日期</td>
+<td>2026-10-27</td>
+</tr>
+<tr>
+<td>证据清单</td>
+<td>sources/inventory.json，含 64 个文件的固定 URL、SHA-256 与行数</td>
+</tr>
+<tr>
+<td>验证范围</td>
+<td>静态研究；本书构建和教学示例另有自动检查；未运行 Octop 端到端测试</td>
+</tr>
+</tbody></table></div>
+<h2 id="术语速查">术语速查<a class="anchor" href="#术语速查" aria-label="链接到本节">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>术语</th>
+<th>在本书中的意思</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>宿主</td>
+<td>把运行库接成产品的 Octop 服务</td>
+</tr>
+<tr>
+<td>控制面</td>
+<td>用户、资源、配置与权限等持久状态</td>
+</tr>
+<tr>
+<td>composition root</td>
+<td>集中创建并连接依赖的位置</td>
+</tr>
+<tr>
+<td>turn</td>
+<td>一次处理回合，不等于一条 token 帧</td>
+</tr>
+<tr>
+<td>session_key</td>
+<td>某个入口绑定当前线程的会话键</td>
+</tr>
+<tr>
+<td>thread_id</td>
+<td>持续对话及执行状态的身份</td>
+</tr>
+<tr>
+<td>checkpoint</td>
+<td>运行图保存与恢复的状态</td>
+</tr>
+<tr>
+<td>projection</td>
+<td>为某种读取需求形成的消息视图</td>
+</tr>
+<tr>
+<td>HITL</td>
+<td>工具执行前后的人工参与与恢复机制</td>
+</tr>
+<tr>
+<td>inbox</td>
+<td>多 Agent 派工和回叫的内部协调入口</td>
+</tr>
+<tr>
+<td>outbox</td>
+<td>本章教学模型里的待投递记录，不表示已发送</td>
+</tr>
+<tr>
+<td>Bridge</td>
+<td>Octop 实例间请求与流的桥接</td>
+</tr>
+<tr>
+<td>MCP</td>
+<td>工具发现与调用协议，不是权限模型</td>
+</tr>
+<tr>
+<td>ACP</td>
+<td>Agent 与客户端或 runner 的交互协议</td>
+</tr>
+</tbody></table></div>
+<h2 id="先读哪五组材料">先读哪五组材料<a class="anchor" href="#先读哪五组材料" aria-label="链接到本节">#</a></h2>
+<ol>
+<li><strong>起点：docs/architecture.md 与 infra/server.py。</strong> 文档建立地图，代码核对实际单例与装配顺序。</li>
+<li><strong>决策：ADR 001 与 ADR 002。</strong> 结合阅读，区分最初的 SQLite 背景和后来加入的 PG 选择。</li>
+<li><strong>主链路：chat/ws.py、chat/turn.py 与 GlobalProcessor。</strong> 跟踪身份、绑定、排队、执行、记录和推送。</li>
+<li><strong>存储：docs/versioned-history.md、db/pool.py 与 history/。</strong> 先列保证和非目标，再读事务与恢复。</li>
+<li><strong>协作：docs/expert-teams.md 与 teams/jobs.py。</strong> 不要将早期 mailbox 设计全文当作新实现清单。</li>
+</ol>
+<h2 id="按章节核验源码">按章节核验源码<a class="anchor" href="#按章节核验源码" aria-label="链接到本节">#</a></h2>
+<p>以下全部链接固定到本次提交。路径长度较长，网页和 EPUB 中可点击；PDF 可使用链接或从目录定位章节。行数没有写进永久正文，避免把行号当成接口。</p>
+<h3 id="00-preface">00-preface<a class="anchor" href="#00-preface" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/pyproject.toml"><code>pyproject.toml</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/README_CN.md"><code>README_CN.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/architecture.md"><code>docs/architecture.md</code></a></li>
+</ul>
+<h3 id="01-requirements">01-requirements<a class="anchor" href="#01-requirements" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/README_CN.md"><code>README_CN.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/architecture.md"><code>docs/architecture.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/common/agent.py"><code>src/octop/api/common/agent.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/routers/chat/ws.py"><code>src/octop/api/routers/chat/ws.py</code></a></li>
+</ul>
+<h3 id="02-architecture">02-architecture<a class="anchor" href="#02-architecture" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/architecture.md"><code>docs/architecture.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/adr/001-single-process-model.md"><code>docs/adr/001-single-process-model.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/adr/002-database-backends.md"><code>docs/adr/002-database-backends.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/server.py"><code>src/octop/infra/server.py</code></a></li>
+</ul>
+<h3 id="03-lifecycle">03-lifecycle<a class="anchor" href="#03-lifecycle" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/launch.py"><code>src/octop/launch.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/server.py"><code>src/octop/infra/server.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/db/factory.py"><code>src/octop/infra/db/factory.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/db/rebind.py"><code>src/octop/infra/db/rebind.py</code></a></li>
+</ul>
+<h3 id="04-agent-runtime">04-agent-runtime<a class="anchor" href="#04-agent-runtime" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/manager.py"><code>src/octop/infra/agents/manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/middleware/model_failover.py"><code>src/octop/infra/agents/middleware/model_failover.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/middleware/octop_ui_offload.py"><code>src/octop/infra/agents/middleware/octop_ui_offload.py</code></a></li>
+</ul>
+<h3 id="05-identity">05-identity<a class="anchor" href="#05-identity" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/common/agent.py"><code>src/octop/api/common/agent.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/routers/chat/turn.py"><code>src/octop/api/routers/chat/turn.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/gateway/threads.py"><code>src/octop/infra/gateway/threads.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/tests/integration/test_boundary_authz.py"><code>tests/integration/test_boundary_authz.py</code></a></li>
+</ul>
+<h3 id="06-storage">06-storage<a class="anchor" href="#06-storage" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/adr/002-database-backends.md"><code>docs/adr/002-database-backends.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/db/pool.py"><code>src/octop/infra/db/pool.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/versioned-history.md"><code>docs/versioned-history.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/history/service.py"><code>src/octop/infra/history/service.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/history/recorder.py"><code>src/octop/infra/history/recorder.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/db/migrations/001_initial.sql"><code>src/octop/infra/db/migrations/001_initial.sql</code></a></li>
+</ul>
+<h3 id="07-workspace">07-workspace<a class="anchor" href="#07-workspace" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/agent-backend-file-io.md"><code>docs/agent-backend-file-io.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/backend/adapter.py"><code>src/octop/infra/backend/adapter.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/backend/resolver.py"><code>src/octop/infra/backend/resolver.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/routers/chat/turn.py"><code>src/octop/api/routers/chat/turn.py</code></a></li>
+</ul>
+<h3 id="08-turn-path">08-turn-path<a class="anchor" href="#08-turn-path" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/routers/chat/ws.py"><code>src/octop/api/routers/chat/ws.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/routers/chat/turn.py"><code>src/octop/api/routers/chat/turn.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/gateway/process/processor.py"><code>src/octop/infra/gateway/process/processor.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/gateway/process/stream_project.py"><code>src/octop/infra/gateway/process/stream_project.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/middleware/model_failover.py"><code>src/octop/infra/agents/middleware/model_failover.py</code></a></li>
+</ul>
+<h3 id="09-memory-rag">09-memory-rag<a class="anchor" href="#09-memory-rag" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/memory/backend.py"><code>src/octop/infra/agents/memory/backend.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/knowledge/index.py"><code>src/octop/infra/knowledge/index.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/knowledge/retrieve.py"><code>src/octop/infra/knowledge/retrieve.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/knowledge/jobs.py"><code>src/octop/infra/knowledge/jobs.py</code></a></li>
+</ul>
+<h3 id="10-extensions">10-extensions<a class="anchor" href="#10-extensions" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/manager.py"><code>src/octop/infra/agents/manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/plugins/manager.py"><code>src/octop/infra/agents/plugins/manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/connectors/builder.py"><code>src/octop/infra/connectors/builder.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/connectors/catalog.json"><code>src/octop/infra/connectors/catalog.json</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/octop-ui-payload-offload.md"><code>docs/octop-ui-payload-offload.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/plugins/README_CN.md"><code>plugins/README_CN.md</code></a></li>
+</ul>
+<h3 id="11-teams">11-teams<a class="anchor" href="#11-teams" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/expert-teams.md"><code>docs/expert-teams.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/agent-interop-mailbox.md"><code>docs/agent-interop-mailbox.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/teams/jobs.py"><code>src/octop/infra/agents/teams/jobs.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/teams/team_manager.py"><code>src/octop/infra/agents/teams/team_manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/teams/service.py"><code>src/octop/infra/agents/teams/service.py</code></a></li>
+</ul>
+<h3 id="12-security">12-security<a class="anchor" href="#12-security" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/middleware/jwt_auth.py"><code>src/octop/api/middleware/jwt_auth.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/middleware/setup_lockdown.py"><code>src/octop/api/middleware/setup_lockdown.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/common/agent.py"><code>src/octop/api/common/agent.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/gateway/hitl/coordinator.py"><code>src/octop/infra/gateway/hitl/coordinator.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/security/hitl_session.py"><code>src/octop/infra/agents/security/hitl_session.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/utils/ssrf_guard.py"><code>src/octop/infra/utils/ssrf_guard.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/bridge/tunnel_policy.py"><code>src/octop/infra/bridge/tunnel_policy.py</code></a></li>
+</ul>
+<h3 id="13-dashboard">13-dashboard<a class="anchor" href="#13-dashboard" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/package.json"><code>dashboard/package.json</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/pages/Chat/hooks/chatStore.ts"><code>dashboard/src/pages/Chat/hooks/chatStore.ts</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/pages/Chat/hooks/wsResumeGate.ts"><code>dashboard/src/pages/Chat/hooks/wsResumeGate.ts</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/pages/Chat/hooks/frameThread.ts"><code>dashboard/src/pages/Chat/hooks/frameThread.ts</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/utils/parseHarnessChunk.ts"><code>dashboard/src/utils/parseHarnessChunk.ts</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/pages/Chat/hooks/chatStore.history.test.ts"><code>dashboard/src/pages/Chat/hooks/chatStore.history.test.ts</code></a></li>
+</ul>
+<h3 id="14-interop">14-interop<a class="anchor" href="#14-interop" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/acp.md"><code>docs/acp.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/bridge.md"><code>docs/bridge.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/bridge/manager.py"><code>src/octop/infra/bridge/manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/bridge/transport.py"><code>src/octop/infra/bridge/transport.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/bridge/http_tunnel.py"><code>src/octop/infra/bridge/http_tunnel.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/bridge/tunnel_policy.py"><code>src/octop/infra/bridge/tunnel_policy.py</code></a></li>
+</ul>
+<h3 id="15-operations">15-operations<a class="anchor" href="#15-operations" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/desktop/README.md"><code>desktop/README.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docker/docker-compose.yml"><code>docker/docker-compose.yml</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/Makefile"><code>Makefile</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/.github/workflows/ci.yml"><code>.github/workflows/ci.yml</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/cron/manager.py"><code>src/octop/infra/cron/manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/cron/job.py"><code>src/octop/infra/cron/job.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/versioned-history.md"><code>docs/versioned-history.md</code></a></li>
+</ul>
+<h3 id="16-tradeoffs">16-tradeoffs<a class="anchor" href="#16-tradeoffs" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/adr/001-single-process-model.md"><code>docs/adr/001-single-process-model.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/adr/002-database-backends.md"><code>docs/adr/002-database-backends.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/manager.py"><code>src/octop/infra/agents/manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/gateway/process/processor.py"><code>src/octop/infra/gateway/process/processor.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/dashboard/src/pages/Chat/hooks/chatStore.ts"><code>dashboard/src/pages/Chat/hooks/chatStore.ts</code></a></li>
+</ul>
+<h3 id="17-mini-host">17-mini-host<a class="anchor" href="#17-mini-host" aria-label="链接到本节">#</a></h3>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/routers/chat/turn.py"><code>src/octop/api/routers/chat/turn.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/teams/jobs.py"><code>src/octop/infra/agents/teams/jobs.py</code></a></li>
+</ul>
+<h2 id="参考本地-sam-系列的方法">参考本地 SAM 系列的方法<a class="anchor" href="#参考本地-sam-系列的方法" aria-label="链接到本节">#</a></h2>
+<p>本书按用户要求参考本地 learning_sam 的系列博客组织方式。主要对照材料包括支付系列开篇、需求 PRD、技术方案、支付编排与渠道路由，秒杀系列幂等设计，以及 DDD 工程目录划分。它们用于研究如何讲解，不用于证明 Octop 的实现。</p>
+<p>借鉴点是需求推导、职责边界、关键代码、完整场景和异常闭环。本文没有复制原博客正文、图片、生产事故和性能指标，也没有把第三方全文归档放入电子书。SAM 材料本身的实现或数字是否可靠不属于本次研究范围。</p>
+<p>本地参考入口：</p>
+<ul>
+<li>learning_sam/payment/docs/zsxq-organized/</li>
+<li>learning_sam/seckill/docs/zsxq-organized/</li>
+<li>learning_sam/ddd-practice/docs/zsxq-organized/</li>
+</ul>
+<h2 id="本书与原项目的权利说明">本书与原项目的权利说明<a class="anchor" href="#本书与原项目的权利说明" aria-label="链接到本节">#</a></h2>
+<p>Octop 的 LICENSE 为 MIT。本文以自己的分析文字介绍项目，少量摘录保留可核对的源码入口；若再分发上游源码，需遵守其 LICENSE。书稿不是腾讯云官方文档，亦不代表维护者认可。</p>
+<p>阅读器布局与部分构建代码沿用用户本地 langchain-langgraph-from-scratch 电子书；正文和教学程序为本次独立编写。未创建远端仓库、提交或公开发布。</p>
+<details>
+<summary>如何复核一句重要判断</summary>
+
+<p>找到本章对应源码，核对调用者、参数来源、异常分支与释放路径。涉及外部库时再固定其实际安装版本。看到测试名后读取断言与 skip 条件，不把存在测试文件等同于已经执行通过。</p>
+</details>
+
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>“换 PostgreSQL 就能部署多个活跃写实例”这句判断应该去哪两类证据核对？</p>
+<p><strong>答案提示：</strong> 先读 ADR 002 对单活跃写入者的限制，再查内存调度器、锁、WebSocketHub 与团队任务状态的所有权。数据库能接受连接，不等于业务组件已完成分布式协调。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="17-mini-host.html"><small>上一章</small><strong>代码实战：用最小宿主验证四条边界</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

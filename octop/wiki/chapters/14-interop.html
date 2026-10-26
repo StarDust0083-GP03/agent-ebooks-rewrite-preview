@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>跨端协作：ACP 与 Bridge 各管什么 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 14</div><div class="rail-title">跨端协作：ACP 与 Bridge 各管什么</div><ol><li><a href="#都叫协作-执行位置不同">都叫协作，执行位置不同</a></li><li><a href="#acp-是双向的-stdio-集成">ACP 是双向的 stdio 集成</a></li><li><a href="#bridge-不复制专家">Bridge 不复制专家</a></li><li><a href="#两种-websocket-不要混">两种 WebSocket 不要混</a></li><li><a href="#同样的用户编号不是同一身份">同样的用户编号不是同一身份</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 14 章</div><h1>跨端协作：ACP 与 Bridge 各管什么</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 8 分钟</div></header><div class="prose"><h2 id="都叫协作-执行位置不同">都叫协作，执行位置不同<a class="anchor" href="#都叫协作-执行位置不同" aria-label="链接到本节">#</a></h2>
+<p>工作室有两种新需求：编辑想在 IDE 里使用 Octop；另一个办公室有独立 Octop，想借用它的研究专家。前者是客户端/Agent 协议集成，后者是实例间桥接。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>能力</th>
+<th>对端是什么</th>
+<th>执行位置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>入站 ACP</td>
+<td>IDE 或终端客户端</td>
+<td>本地独立 OctopServer 进程</td>
+</tr>
+<tr>
+<td>出站 ACP</td>
+<td>外部编程 Agent runner</td>
+<td>外部 runner 所在宿主环境</td>
+</tr>
+<tr>
+<td>Bridge</td>
+<td>另一台 Octop</td>
+<td>专家所在的远端实例</td>
+</tr>
+</tbody></table></div>
+<p>不要把“远端专家”自动塞进本机 Agent 注册表，也不要把 ACP 当成 Octop 的 HTTP 聊天 API。</p>
+<h2 id="acp-是双向的-stdio-集成">ACP 是双向的 stdio 集成<a class="anchor" href="#acp-是双向的-stdio-集成" aria-label="链接到本节">#</a></h2>
+<p>docs/acp.md 说明两种方向均使用 stdio JSON-RPC。入站 octop acp 作为 server，供 Zed 等客户端驱动；出站 acp_runner 作为 client，把任务交给外部工具。</p>
+<p>入站命令会启动 standalone OctopServer，并非一定连接已经运行的 octop run。这对运维很重要：若多个进程指向相同数据目录，不能默认它们会共享内存中的锁和调度所有权。</p>
+<p>出站 runner 配置是按用户共享，启用工具则按 Agent 控制。命令在运行 Octop 的机器上找 PATH、凭证和工作目录，不是在浏览器机器上执行。给浏览器安装一个 CLI，不能使远端服务突然找到它。</p>
+<p>外部 runner 的 permission_required 还需要选择精确 option。不能把内部 HITL 的“批准”直接泛化为外部协议任何选项都已同意。</p>
+<h2 id="bridge-不复制专家">Bridge 不复制专家<a class="anchor" href="#bridge-不复制专家" aria-label="链接到本节">#</a></h2>
+<p>远程专家在本地用 bridge:{connection_id}:{remote_agent_id} 表示。浏览器仍请求本机 API，本机识别远端引用后转发；专家运行、线程权威、附件落盘与历史保留在专家所在侧。</p>
+<pre><code class="language-text">浏览器
+  → 本机 HTTP / chat WS
+  → Bridge 连接：HTTP 隧道与 turn 流
+  → 远端 API / GlobalProcessor / harness
+  → 远端工作区与历史
+  ← 响应、chunk 与按需历史
+</code></pre>
+<p>本机可以持有连接配置与临时状态，但不因此成为远端对话历史的第二个完整权威。桥断了以后，不应自动启动一个本地同名专家并续写，那会改变数据和工具归属。</p>
+<h2 id="两种-websocket-不要混">两种 WebSocket 不要混<a class="anchor" href="#两种-websocket-不要混" aria-label="链接到本节">#</a></h2>
+<p>Dashboard 的 WebSocketHub 服务浏览器到本机的订阅；Bridge 有独立的机机长连接，承载隧道与流式多路复用。浏览器不应直接改成访问远端 baseURL，以绕过本机桥接。</p>
+<p>通用 HTTP 隧道可承载 method、path、headers、body 等，但产品安全策略不必允许所有路径。实际 tunnel_policy.py 对专家面、只读 composer、浏览器 viewer 等分别约束，未知路径默认拒绝。</p>
+<p>docs/bridge.md 的某些模块清单仍是早期规划，当前实际文件包括 manager.py、transport.py、http_tunnel.py、peer_auth.py 和 peer_turn.py。书中的源码导航使用实际文件，不把规划文件名写成已实现。</p>
+<h2 id="同样的用户编号不是同一身份">同样的用户编号不是同一身份<a class="anchor" href="#同样的用户编号不是同一身份" aria-label="链接到本节">#</a></h2>
+<p>假设本机林岚是 user 7，远端合作账号是 user 12。隧道在对端用对应登录态执行，资源可见性应由对端用户决定。本机 user_id 不能直接复制成远端 user_id。</p>
+<p>共享桥链接的使用者与连接所有者也有不同管理能力。评审要看路径、方法、连接归属及最终授权组合，而不是只判断连接是否已加密。</p>
+<p>如果需要防止重复外发，还要跨桥保留动作身份和结果查询机制。Bridge 传输成功不等于工具事务成功；网络超时也不说明远端没有执行。</p>
+<details>
+<summary>当前实现与生产承诺</summary>
+
+<p>官方 Bridge 文档仍标注“实现中”。本书只依据快照解释已可定位的结构，没有做跨实例联调、断网压测、版本兼容或安全验收。它适合研究边界，不应直接充当生产可靠性证明。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/acp.md"><code>docs/acp.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/bridge.md"><code>docs/bridge.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/bridge/manager.py"><code>src/octop/infra/bridge/manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/bridge/transport.py"><code>src/octop/infra/bridge/transport.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/bridge/http_tunnel.py"><code>src/octop/infra/bridge/http_tunnel.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/bridge/tunnel_policy.py"><code>src/octop/infra/bridge/tunnel_policy.py</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>本机和远端各有一位叫 research 的专家。桥连接断开后，自动切成本机 research 是否是透明容灾？</p>
+<p><strong>答案提示：</strong> 不是。工作区、凭证、知识、记忆、线程和执行环境都可能不同。除非产品定义并实现了可验证的复制与故障转移协议，否则这是换了执行主体。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="13-dashboard.html"><small>上一章</small><strong>前端架构：流式对话是一台状态机</strong></a><a class="next" href="15-operations.html"><small>下一章</small><strong>部署与验证：把恢复当成一项功能</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

@@ -1,0 +1,23 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>开篇：为什么文档都在，助手还是回答错了 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="00-opening"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#我们要做一套什么系统">我们要做一套什么系统</a></li><li><a href="#为什么选择-rag-techniques">为什么选择 RAG_Techniques</a></li><li><a href="#按-sam-系列的方式展开">按 SAM 系列的方式展开</a></li><li><a href="#全书模块">全书模块</a></li><li><a href="#读完以后应该能做什么">读完以后应该能做什么</a></li><li><a href="#对应代码与资料">对应代码与资料</a></li></ol></details><article class="content"><h1 id="开篇-为什么文档都在-助手还是回答错了">开篇：为什么文档都在，助手还是回答错了</h1><p>研发同事问：“支付回调已经验签了，重复通知还会不会重复发货？”助手很快给出答案，还附上两段支付文档。点进去一看，第一段是已经废弃的方案，第二段只写验签，没有涉及幂等。回答看起来完整，支持它的材料却不完整。</p>
+<p>这是本书设置的教学场景，不是真实线上事故。它暴露的问题很具体：文档在知识库里，不代表会被找到；找到相关段落，也不代表这些段落足以支持结论。要把一个文档问答做成可检查的工程，得沿着整条链路追踪。</p>
+<h2 id="我们要做一套什么系统">我们要做一套什么系统</h2><p>这本书围绕一套企业研发知识库展开。资料包括支付规范、退款说明、对账文档和模块负责人目录。用户希望查规则、比较方案、定位负责人；系统需要回答并给出可核对的出处。</p>
+<p>先定一个限制：助手不执行支付、退款或发货。它能解释规范，但不能仅凭搜索结果把订单状态改成成功。文档知识、当前交易状态和操作权限是不同对象，不能都塞进一个向量库后指望模型自行处理。</p>
+<p>示例资料全部新写，共 10 个教学片段。它们包含现行规则、废弃规则、跨段证据和不同用户的私人笔记。案例规模很小，目的是让你能手算排序与证据选择，不宣称代表任何企业的真实数据或性能。</p>
+<h2 id="为什么选择-rag-techniques">为什么选择 RAG_Techniques</h2><p>上游提供从 Simple RAG 到查询改写、混合检索、重排、上下文扩展、纠错、图谱和评估的实验入口。单独打开每个 Notebook 容易学会某种技巧，却不容易知道系统什么时候需要它。</p>
+<p>本书按工程演进重新安排：需求决定验收条件，验收条件决定数据和接口，基础链路跑通后，再用失败样本选择优化。上游的方法是材料来源，不是必须全部安装的组件清单。</p>
+<p>源码固定到提交 <code>8e9febb8b974daaed2d4f3ebf370c7bf877858ac</code>，核对日期为 2026-10-27。我们静态阅读了部分核心实现，没有运行所有远程模型案例。论文只核对了标题和摘要；涉及具体训练或算法细节时，会提醒读者回到论文全文。</p>
+<h2 id="按-sam-系列的方式展开">按 SAM 系列的方式展开</h2><p>本书参考本地 SAM 支付、商品和 DDD 系列的组织方法。开篇交代问题，需求篇明确范围，技术方案篇从需求推导模块，后续每篇解决一个具体环节，并把设计落到数据或函数；完结篇用一次请求串起全书。</p>
+<p>参考的是讲解顺序和取舍方式，不复刻原文，也不借用作者“我在生产环境遇到过”的叙述。SAM 的图片、业务规模和支付方案不作为本书的检索数据。原来的仪器预约草稿已经停用，本书统一使用研发文档案例。</p>
+<h2 id="全书模块">全书模块</h2><p>前 3 篇讲清目标、接口和资料进入系统的方式。第 4 至 8 篇完成切分、检索、融合、查询处理与证据组装。第 9 篇建立评估，再讨论第 10 至 13 篇的纠错、层次索引、图谱、多模态与 Agent。第 14、15 篇处理上线边界和端到端回顾。</p>
+<p>书中独立实现了 BM25、词频余弦、RRF、权限过滤、邻域扩展和证据打包。运行不需要模型密钥。词频余弦不具备语义 embedding 的能力，程序也不会生成自然语言答案。远程模型部分通过机制与接口讲解，不冒充本地已实现的功能。</p>
+<pre tabindex="0"><code class="hljs">python3 examples/mini_rag.py
+python3 -m unittest discover -s examples -v</code></pre><h2 id="读完以后应该能做什么">读完以后应该能做什么</h2><p>你应该能对一次失败指出发生位置：解析错了、没有召回、排序落后、打包丢失，还是回答超出了证据。也应该能解释为什么此时选择混合检索而不是图谱，为什么一次查询最多重试几次，以及新文档发布后哪些派生数据必须刷新。</p>
+<p>不必记住全部方法名称。能拿着候选 ID、最终证据和回答逐步核对，比背出“高级 RAG 架构”更有用。</p>
+<h2 id="对应代码与资料">对应代码与资料</h2><ul>
+<li><a href="../../examples/mini_rag.py">最小检索实验</a></li>
+<li><a href="../../examples/documents.jsonl">教学资料</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/README.md">上游 README</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/LICENSE">上游许可证</a></li>
+</ul>
+<p>上游是自定义非商业许可，商业使用受许可材料前需取得作者事先书面授权。本书为待审阅的原创学习草稿，不将第三方内容重新授权。</p>
+</article><nav class="pager" aria-label="篇章导航"><span></span><a href="01-requirements.html"><small>下一篇</small>需求篇：先确定哪些问题必须答对</a></nav></main><script src="../assets/wiki.js"></script></body></html>

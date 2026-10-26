@@ -1,0 +1,59 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>需求篇：先确定哪些问题必须答对 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="01-requirements"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#三类调用方-三种结果要求">三类调用方，三种结果要求</a></li><li><a href="#回答要带哪些信息">回答要带哪些信息</a></li><li><a href="#资料更新也是需求">资料更新也是需求</a></li><li><a href="#验收条件怎样写">验收条件怎样写</a></li><li><a href="#这个阶段为什么不做-agent">这个阶段为什么不做 Agent</a></li><li><a href="#对应代码与资料">对应代码与资料</a></li></ol></details><article class="content"><h1 id="需求篇-先确定哪些问题必须答对">需求篇：先确定哪些问题必须答对</h1><p>技术方案从一个具体请求开始：“支付回调验签和幂等如何处理？”如果系统只返回验签顺序，就漏掉重复通知的规则；如果它引用旧版方案，就可能给出相反的处理顺序。检索到了两条结果，不是这项需求的验收条件。</p>
+<h2 id="三类调用方-三种结果要求">三类调用方，三种结果要求</h2><p>新人希望理解流程，值班研发希望找到规范和负责人，文档维护者则需要检查更新是否生效。它们可以共用检索接口，但回答形式和验收点不同。</p>
+<table>
+<thead>
+<tr>
+<th>请求</th>
+<th>必要结果</th>
+<th>不能接受的行为</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>回调处理顺序</td>
+<td>当前规范的完整条件</td>
+<td>引用废弃规则</td>
+</tr>
+<tr>
+<td>重复通知如何处理</td>
+<td>幂等键与重复事件规则</td>
+<td>将验签等同于幂等</td>
+</tr>
+<tr>
+<td>回调模块找谁评审</td>
+<td>模块归属及团队负责人</td>
+<td>只凭相近人名猜测</td>
+</tr>
+<tr>
+<td>某一笔退款到账了吗</td>
+<td>指出需要业务系统核验</td>
+<td>用说明文档断言到账</td>
+</tr>
+<tr>
+<td>查看同事私人笔记</td>
+<td>按认证身份限制可见范围</td>
+<td>通过换问法越权读取</td>
+</tr>
+</tbody></table>
+<p>第一版支持现行文档查找与证据摘录。跨材料负责人查询先保留为挑战题，不为通过它就立即引入图数据库。真实交易查询、历史时点还原、自动业务操作和全表统计暂不实现。</p>
+<h2 id="回答要带哪些信息">回答要带哪些信息</h2><p>设计一个教学响应合同，便于界面和评估器分清状态。这里是目标接口草图，本书 CLI 只实现其中的候选与证据轨迹。</p>
+<pre tabindex="0"><code class="hljs"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;request_id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;demo-001&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;status&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;evidence_ready&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;answer&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">null</span></span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;citations&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span><span class="hljs-string">&quot;callback-v2:0&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;callback-v2:1&quot;</span><span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;index_version&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;teaching-v1&quot;</span>
+<span class="hljs-punctuation">}</span></code></pre><p><code>evidence_ready</code> 表示已经组装证据，不表示模型回答正确。<code>insufficient_evidence</code> 表示材料不足，<code>dependency_failed</code> 表示检索或模型服务异常。把后两者都写成“没有相关资料”会掩盖系统故障，也会误导用户补问。</p>
+<p>来源至少包含文档、版本和片段定位。用户要能核对引用支持哪句话。只有一个“参考资料”长列表，无法发现模型把验签文档用来支持幂等结论的错误。</p>
+<h2 id="资料更新也是需求">资料更新也是需求</h2><p>支付规范从 v1 升级到 v2 后，普通查询默认使用 v2。v1 可以保留做审计，但不能因措辞更贴近问题就抢到当前回答中。删除私人笔记后，不仅原文不可读，其向量、摘要、生成问题和回答缓存也不能继续泄露它。</p>
+<p>第一版代码使用 <code>active</code> 字段演示当前视图，用 <code>scope</code> 演示用户范围。它没有真实登录、复杂组织权限或删除事务，不能作为现成的安全服务部署。目标系统应从认证会话取得身份，不能接受客户端自报用户名。</p>
+<h2 id="验收条件怎样写">验收条件怎样写</h2><p>“准确率超过 95%”缺少题集、判定和样本量。可以先给每个问题标注必要片段，再检查这些片段是否进入最终证据包。回调题的 gold 是 <code>callback-v2:0</code> 与 <code>callback-v2:1</code>；只命中一条算部分召回，不能算完成。</p>
+<p>还需要无答案题、旧版干扰题和权限题。对这些题，少答有时比凑足 top-k 更符合需求。系统等待时间与每次调用费用也应记录，但本书不提前承诺未经压测的 P99 或吞吐量。</p>
+<h2 id="这个阶段为什么不做-agent">这个阶段为什么不做 Agent</h2><p>第一版问题大多能通过一次检索和一次组装完成。Agent 增加决策调用、重试和工具权限，需要独立评估。先保留明确的函数边界，待失败样本证明“需要第二轮查团队负责人”时，再加一条受控流程。</p>
+<p>这与是否使用某个框架无关。固定步骤可以写成普通函数，也可以交给工作流框架；关键是每一步输入、输出和失败条件能被检查。</p>
+<h2 id="对应代码与资料">对应代码与资料</h2><ul>
+<li><a href="../../examples/mini_rag.py">Chunk、Retriever 与证据打包</a></li>
+<li><a href="../../examples/documents.jsonl">带版本和范围的资料</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/reliable_rag.ipynb">上游 Reliable RAG</a></li>
+</ul>
+<p>本章接口是本书的工程设计，不声称上游已实现相同的企业产品合同。</p>
+</article><nav class="pager" aria-label="篇章导航"><a href="00-opening.html"><small>上一篇</small>开篇：为什么文档都在，助手还是回答错了</a><a href="02-architecture.html"><small>下一篇</small>技术方案：从需求推导一条可检查的链路</a></nav></main><script src="../assets/wiki.js"></script></body></html>

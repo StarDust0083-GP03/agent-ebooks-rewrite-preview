@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>记忆与知识库：两条不同的检索路径 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 09</div><div class="rail-title">记忆与知识库：两条不同的检索路径</div><ol><li><a href="#昨天的约定与今天的资料">昨天的约定与今天的资料</a></li><li><a href="#memory-后端由宿主解析">Memory 后端由宿主解析</a></li><li><a href="#知识库索引没有依赖大型向量服务">知识库索引没有依赖大型向量服务</a></li><li><a href="#检索先限制集合-再排序">检索先限制集合，再排序</a></li><li><a href="#一个可见的降级点">一个可见的降级点</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 09 章</div><h1>记忆与知识库：两条不同的检索路径</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 8 分钟</div></header><div class="prose"><h2 id="昨天的约定与今天的资料">昨天的约定与今天的资料<a class="anchor" href="#昨天的约定与今天的资料" aria-label="链接到本节">#</a></h2>
+<p>林岚说过“优先给中文资料”，这可能适合成为 Agent 的长期记忆。上传的出版规范则是一份有版本和来源的文档，适合进入知识库。两者都影响回答，但保存的单位、权限范围和更新方式不同。</p>
+<p>聊天历史记录这次说过什么；checkpoint 支撑图的状态；Memory 组织可复用信息；知识库索引文档证据。它们都可能存文本，不意味着可以合并成一张“聊天信息表”。</p>
+<h2 id="memory-后端由宿主解析">Memory 后端由宿主解析<a class="anchor" href="#memory-后端由宿主解析" aria-label="链接到本节">#</a></h2>
+<p>memory_backend_from_agent_config 读取 Agent 配置。没有显式指定后端时，SQLite 控制面保留运行库的默认；PostgreSQL 控制面则默认向 Memory 传同一 DSN，并按 Agent 命名空间区分。显式 sqlite 覆盖仍然存在。</p>
+<p>这是存储选择，不是授权策略。让多个专家复用一个 DSN，并不等于它们共享记忆；反过来，分开文件也不能代替应用层访问控制。</p>
+<p>源码还给记忆辅助抽取模型做解析与兼容处理。日常聊天用的默认模型和记忆维护模型可能不同。因此“聊天正常、记忆提炼失败”并不矛盾，应检查各自模型配置及可用性。</p>
+<p>本书不展开外部 octop-memory 的全部提取与召回算法，避免把宿主参数名字当成内部算法证明。</p>
+<h2 id="知识库索引没有依赖大型向量服务">知识库索引没有依赖大型向量服务<a class="anchor" href="#知识库索引没有依赖大型向量服务" aria-label="链接到本节">#</a></h2>
+<p>KnowledgeIndex 的类注释很直接：每个知识库使用一个本地 SQLite sidecar。chunks 表保存 chunk_id、doc_id、ordinal、text、embedding 和 metadata；embedding 以二进制形式保存。</p>
+<p>replace_doc_chunks 在事务中先删除该文档旧片段，再写入新的片段。它处理的是单个索引内的文档替换，不保证“上传源文件、解析状态、embedding 服务、索引内容”跨组件原子提交。</p>
+<p>search 在进程中计算余弦相似度。这样的实现部署简单，但不能根据“支持向量检索”四个字就假设已经用了 ANN 索引或独立向量数据库。数据增长时应测量扫描量、向量维度、内存与延迟。</p>
+<h2 id="检索先限制集合-再排序">检索先限制集合，再排序<a class="anchor" href="#检索先限制集合-再排序" aria-label="链接到本节">#</a></h2>
+<p>retrieve_context 的读取流程可以概括为：</p>
+<pre><code class="language-text">检查知识能力与 query
+ → 为 query 生成 embedding
+ → 取得当前主体可见知识库
+ → 与本轮选中的知识库取交集
+ → 在 ready 文档范围内筛选命中
+ → 汇总并按 score 排序
+ → 截取 k 个候选
+ → 在字符预算内拼接上下文与引用
+</code></pre>
+<p>当前默认 k 为 8，正文字符预算为 6000。这是快照中的实现常量，不是所有模型的通用最佳参数，也不是 token 预算。中文、英文与代码的字符到 token 比例不同。</p>
+<p>权限应在候选集合形成之前起作用，不能先搜出别人材料，再指望提示词让模型别引用。ready 文档限制则避免把未成功完成索引的材料误当可用证据。</p>
+<h2 id="一个可见的降级点">一个可见的降级点<a class="anchor" href="#一个可见的降级点" aria-label="链接到本节">#</a></h2>
+<p>retrieve_context 把同步检索放到 executor，外层捕获失败后记日志并返回空字符串。收益是知识检索失败不必让整个聊天崩溃；代价是用户可能收到没有私有证据支持的普通回答。</p>
+<p>对工作室的出版规范查询，这个降级是否可接受取决于产品约束。如果要求“只能按上传规范回答”，检索不可用时应显式提示而不是静默继续。这是演进建议，不代表当前所有入口已实现严格失败关闭。</p>
+<p>引用标记也只说明来源关联，不自动保证答案完全受引用支持。验收应检查最终模型输入、选中的片段和实际回答，而不只看界面有没有一个引用徽标。</p>
+<details>
+<summary>一个有用的对照实验</summary>
+
+<p>准备两份虚构规范，分别可被林岚和周越读取。让两人提出相同关键词。记录可见集合、命中片段、注入正文及回答引用。这样能区分授权错误、召回错误、注入缺失和生成错误；只测“模型答得像不像”无法定位问题。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/memory/backend.py"><code>src/octop/infra/agents/memory/backend.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/knowledge/index.py"><code>src/octop/infra/knowledge/index.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/knowledge/retrieve.py"><code>src/octop/infra/knowledge/retrieve.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/knowledge/jobs.py"><code>src/octop/infra/knowledge/jobs.py</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>控制面切到 PostgreSQL 后，本地 knowledge 目录能不能直接删除，等系统从 PG 里自动恢复全部向量？</p>
+<p><strong>答案提示：</strong> 不能这样推断。知识索引在该快照里是本地 sidecar，需检查原始文档与索引重建路径。控制面远程化没有自动迁走所有数据。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="08-turn-path.html"><small>上一章</small><strong>一次对话：从 WebSocket 到模型再回来</strong></a><a class="next" href="10-extensions.html"><small>下一章</small><strong>工具与扩展：Skill、Plugin、Connector 和 MCP</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

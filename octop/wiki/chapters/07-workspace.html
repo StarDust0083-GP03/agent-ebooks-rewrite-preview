@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>工作区后端：远程文件不等于远程执行 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 07</div><div class="rail-title">工作区后端：远程文件不等于远程执行</div><ol><li><a href="#附件不是一条预览-url">附件不是一条预览 URL</a></li><li><a href="#backendworkspace-隔离的是内容访问">BackendWorkspace 隔离的是内容访问</a></li><li><a href="#两类路径必须区分">两类路径必须区分</a></li><li><a href="#用一次提示文件修改看差异">用一次提示文件修改看差异</a></li><li><a href="#后端替换需要契约测试">后端替换需要契约测试</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 07 章</div><h1>工作区后端：远程文件不等于远程执行</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 8 分钟</div></header><div class="prose"><h2 id="附件不是一条预览-url">附件不是一条预览 URL<a class="anchor" href="#附件不是一条预览-url" aria-label="链接到本节">#</a></h2>
+<p>林岚上传访谈时，浏览器可能获得一个预览链接和一个工作区路径。后续聊天准备会优先根据 workspace_path 形成附件内容；只带预览 URL 的块不能等价为已经入库、可被工具读取的附件。</p>
+<p>这背后的问题是权威位置。浏览器看得到一个地址，不说明模型工具能读取它，也不说明它属于当前专家。先落到受控 inbound，再传递工作区引用，才能让输入、读取与权限检查对齐。</p>
+<h2 id="backendworkspace-隔离的是内容访问">BackendWorkspace 隔离的是内容访问<a class="anchor" href="#backendworkspace-隔离的是内容访问" aria-label="链接到本节">#</a></h2>
+<p>Octop 支持本地文件系统、对象存储、PostgreSQL 文件后端，以及 Docker、OpenSandbox 等后端形式。adapter.py 将控制面后端行转换为 harness 的 backend spec；resolver 再结合 Agent 配置选择实际后端。</p>
+<p>这不表示这些后端都有完全相同的执行与文件语义。把文件存进 S3 解决的是存取位置；在 Docker 中执行命令涉及进程、挂载与权限。它们可能出现在同一配置体系，仍必须分别分析。</p>
+<p>项目的 agent-backend-file-io 文档要求 Agent 内容文件通过工作区接口访问，而不是直接 Path.read_text。假如编辑专家改用 COS，而 API 仍直接读本机同名 SOUL.md，就会出现“页面说已修改，实际模型读旧内容”的分叉。</p>
+<h2 id="两类路径必须区分">两类路径必须区分<a class="anchor" href="#两类路径必须区分" aria-label="链接到本节">#</a></h2>
+<pre><code class="language-text">内容路径：SOUL.md、skills/、inbound/、生成文件
+    → 走 BackendWorkspace 的内容访问
+
+本地运行材料：部分 checkpoint、harness 管理的状态与回退文件
+    → 按运行库及所选后端的具体约定处理
+</code></pre>
+<p>docs/architecture.md 描述了本地运行文件的默认安排；ADR 002 又说明 PostgreSQL memory 场景可复用相关 checkpoint 存储。两者需要组合阅读，不能得出“checkpoint 永远是本地文件”这种绝对结论。</p>
+<p>本地 workspace_dir 有时仍承担运行锚点，即使某些内容已搬到远程后端。看到本地目录存在，不说明所有内容都以本地副本为权威。</p>
+<h2 id="用一次提示文件修改看差异">用一次提示文件修改看差异<a class="anchor" href="#用一次提示文件修改看差异" aria-label="链接到本节">#</a></h2>
+<p>教学流程是：界面提交新的专家准则，服务端验证专家配置权限，取得该专家的工作区接口，写入准则文件，再根据能力选择同步或重载。</p>
+<p>错误实现是直接拼接本地路径并写入。它在默认 filesystem 下看似正常，换到远程后端才暴露。另一个错误是先对前端返回“保存成功”，把实际后端写入留给无人跟踪的后台任务。</p>
+<p>远程后端失败需要成为可见结果。否则林岚会以为专家已经改为“外发前审批”，实际执行仍使用旧规则。这已经从存储问题变成安全预期问题。</p>
+<h2 id="后端替换需要契约测试">后端替换需要契约测试<a class="anchor" href="#后端替换需要契约测试" aria-label="链接到本节">#</a></h2>
+<p>新增后端时至少核对文本和二进制、目录列举、相对路径、覆盖写、缺失文件、路径越界、下载和失败传播。对象存储没有天然 POSIX rename 语义；远程延迟也会改变读取大量小文件的代价。</p>
+<p>执行能力还要单列：shell 在哪里运行？浏览器是谁的进程？工作区文件如何进入沙箱？网络请求是否受同样约束？不要用“支持 Docker 后端”代替对所有工具执行环境的检查。</p>
+<p>这些是接入验收建议，不代表本书对每一种后端执行了兼容性测试。</p>
+<details>
+<summary>与 SAM 工程分层的一个对照</summary>
+
+<p>支付系列把渠道差异留在渠道适配层，避免编排层直接面对每家接口。工作区后端也有相似的边界价值：上层提出读写内容的需求，不应到处重写 COS、S3 或本地路径细节。相似的是隔离差异的方法，不是要求照搬 Java 的模块结构。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/agent-backend-file-io.md"><code>docs/agent-backend-file-io.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/backend/adapter.py"><code>src/octop/infra/backend/adapter.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/backend/resolver.py"><code>src/octop/infra/backend/resolver.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/routers/chat/turn.py"><code>src/octop/api/routers/chat/turn.py</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>一段新代码用 Path(workspace_dir) / &quot;inbound&quot; 找附件，本地测试通过。为什么仍不能认为符合后端抽象？</p>
+<p><strong>答案提示：</strong> 它绕过内容后端，隐含附件必在本机该路径。应查看调用者需要的是后端内容引用，还是已按契约材料化的本地临时文件；只有后者才可按明确生命周期使用本地路径。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="06-storage.html"><small>上一章</small><strong>存储与历史：不要寻找唯一数据库</strong></a><a class="next" href="08-turn-path.html"><small>下一章</small><strong>一次对话：从 WebSocket 到模型再回来</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

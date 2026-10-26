@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>多 Agent：房间共享，状态分离 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 11</div><div class="rail-title">多 Agent：房间共享，状态分离</div><ol><li><a href="#把合作拆成编排与执行">把合作拆成编排与执行</a></li><li><a href="#一个房间-三份执行状态">一个房间，三份执行状态</a></li><li><a href="#派工-回叫与收尾">派工、回叫与收尾</a></li><li><a href="#为什么要按-job-id-幂等记账">为什么要按 job_id 幂等记账</a></li><li><a href="#点停止-究竟停止了谁">点停止，究竟停止了谁</a></li><li><a href="#团队与子-agent-也不要混淆">团队与子 Agent 也不要混淆</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 11 章</div><h1>多 Agent：房间共享，状态分离</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 8 分钟</div></header><div class="prose"><h2 id="把合作拆成编排与执行">把合作拆成编排与执行<a class="anchor" href="#把合作拆成编排与执行" aria-label="链接到本节">#</a></h2>
+<p>现在让研究专家整理背景，法务专家核查风险，主持人汇总结果。若只把三个人的消息拼在同一份上下文里，谁负责工具、记忆与取消会很快混乱。</p>
+<p>Octop 的团队主持人是 agents.kind=team 的特殊专家，成员仍是独立专家，可以参与多个团队。团队编制在主持人工作区的 .octop/manifest.json 中，数据库 kind 用于索引。这里没有一张被本书假想出来的独立成员主表。</p>
+<p>普通专家和团队主持人使用同一个 Agent 生命周期体系，但工具权限与调用模式不同。主持人主要协调，不承担完整文件、浏览器和 MCP 执行能力。</p>
+<h2 id="一个房间-三份执行状态">一个房间，三份执行状态<a class="anchor" href="#一个房间-三份执行状态" aria-label="链接到本节">#</a></h2>
+<pre><code class="language-text">房间 conversation_id = 主持人 thread_id
+  主持人 checkpoint：conversation_id
+  研究成员 checkpoint：conversation_id~research
+  法务成员 checkpoint：conversation_id~legal
+
+各专家 → 各自工作区 / 记忆
+成员流 → 房间转播，带说话人标记
+</code></pre>
+<p>用户看见同一条时间线，不表示多个 Agent 写同一个 checkpoint。展示共享与状态共享是两回事。</p>
+<p>成员得到的是主持人改写后的任务说明，群聊历史作为背景；团队准则与记忆在主持人侧，派工时需要明确交付。模型不能因为“加入团队”就自动读取所有同事的私有工作区。</p>
+<h2 id="派工-回叫与收尾">派工、回叫与收尾<a class="anchor" href="#派工-回叫与收尾" aria-label="链接到本节">#</a></h2>
+<p>当前专家团队文档描述：普通专家侧以同步互问为主；主持人异步派工后立即返回，成员完成后由平台回叫主持人。成员能同步询问同事，但不再异步往群里拉人。</p>
+<p>异步调用的关键不是“返回快”，而是要保留 source_agent_id、source_thread_id、目标与任务标识。否则成员几分钟后完成时，平台不知道回到哪个房间，也不知道还应不应该唤醒主持人。</p>
+<p>当前文档说明 inbox 按 callee 协调，同一成员串行、不同成员可并行，主持人回叫按源 thread 串行。早期 mailbox 方案写过单 worker 串行，不能把旧方案当当前宿主契约。具体库内调度器仍需在固定 octop-harness 版本中独立复核。</p>
+<h2 id="为什么要按-job-id-幂等记账">为什么要按 job_id 幂等记账<a class="anchor" href="#为什么要按-job-id-幂等记账" aria-label="链接到本节">#</a></h2>
+<p>团队有在途派工时，不允许随意移除成员或删除对应专家。TeamJobTracker 为这项约束记录 busy 状态。</p>
+<p>下面是 begin 的真实核心片段：</p>
+<pre><code class="language-python">if job_id:
+    if job_id in self._jobs:
+        return
+    self._jobs[job_id] = key
+    return
+</code></pre>
+<p>同一个 job 重复通知开始，不应把繁忙计数加两次。结束时按 job_id 移除，也比“每条结束事件都减一”更稳定。这里幂等的是在途记账，不是成员执行的全部外部副作用。</p>
+<p>TeamJobTracker 使用进程内 dict 和 Lock，重启丢失，源码注释明确它不能为重启前残留任务提供 fencing。不能据此宣称有持久任务队列或跨进程安全。</p>
+<h2 id="点停止-究竟停止了谁">点停止，究竟停止了谁<a class="anchor" href="#点停止-究竟停止了谁" aria-label="链接到本节">#</a></h2>
+<p>团队文档明确：Dashboard 取消只取消主持人当前 stream；已排队或正在运行的成员不因此取消。成员仍可能完成并回叫。</p>
+<p>对林岚来说，这可能表现为“我明明停止了，研究专家还在回话”。它不必然是实现错误，而可能是当前取消语义。界面与文档应清晰表达停止本轮和停止整组任务的差别。</p>
+<p>如果工作室要求“一键取消全部，并阻止后续外发”，就需要扩展任务树取消、回调抑制与工具边界检查。只在前端忽略成员消息，不会停止实际工作。</p>
+<h2 id="团队与子-agent-也不要混淆">团队与子 Agent 也不要混淆<a class="anchor" href="#团队与子-agent-也不要混淆" aria-label="链接到本节">#</a></h2>
+<p>本仓库既有 subagent 目录，也有完整专家团队。一个运行时里的子任务，与拥有独立身份、工作区、分享和会话的专家成员，生命周期不完全相同。</p>
+<p>选哪一种应看需要共享什么、隔离什么、结果回到哪里，而不是看“多 Agent”标签是否相同。能用一个临时子任务解决的处理，不一定需要创建一位长期专家。</p>
+<details>
+<summary>把支付回调的阅读方法用在团队协作</summary>
+
+<p>SAM 编排章节会追踪“哪个子结果到了，什么时候合并”。阅读团队也可以这样做：谁派工、谁收结果、哪个 job 已结束、由谁判断收工。但团队总结不是资金事务，不要套用全成功或全回滚的承诺。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/expert-teams.md"><code>docs/expert-teams.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/docs/agent-interop-mailbox.md"><code>docs/agent-interop-mailbox.md</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/teams/jobs.py"><code>src/octop/infra/agents/teams/jobs.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/teams/team_manager.py"><code>src/octop/infra/agents/teams/team_manager.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/agents/teams/service.py"><code>src/octop/infra/agents/teams/service.py</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>主持人停止后，研究专家创建了文件并回叫。为了做到“界面上看起来已停止”，直接丢弃所有后续帧是否足够？</p>
+<p><strong>答案提示：</strong> 不足。只是隐藏信息，既没取消工具，也没协调历史和任务状态。应先定义取消的范围与已发生动作的处理方式，再决定哪些回调可以继续、哪些必须标记取消。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="10-extensions.html"><small>上一章</small><strong>工具与扩展：Skill、Plugin、Connector 和 MCP</strong></a><a class="next" href="12-security.html"><small>下一章</small><strong>安全边界：能聊天不等于能管理</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

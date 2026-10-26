@@ -1,0 +1,342 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>附录 C：配套实现与教学资料 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="appendix-code"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#mini-rag-py">mini_rag.py</a></li><li><a href="#evaluate-py">evaluate.py</a></li><li><a href="#test-mini-rag-py">test_mini_rag.py</a></li><li><a href="#documents-jsonl">documents.jsonl</a></li></ol></details><article class="content"><h1 id="附录-c-配套实现与教学资料">附录 C：配套实现与教学资料</h1><p>以下内容由构建器从 examples/ 同步。全部为本书独立编写，不复制上游 Notebook。运行命令见开篇与 README。代码只做离线检索和证据组装，不是完整生成式问答服务。</p>
+<h2 id="mini-rag-py">mini_rag.py</h2><pre tabindex="0"><code class="hljs"><span class="hljs-string">&quot;&quot;&quot;Offline retrieval lab: BM25, lexical cosine, RRF, scoped windows.
+
+Original teaching implementation, not a copy of upstream notebooks.
+No semantic embeddings, model API, or natural-language answer generation.
+&quot;&quot;&quot;</span>
+<span class="hljs-keyword">import</span> argparse
+<span class="hljs-keyword">from</span> collections <span class="hljs-keyword">import</span> Counter, defaultdict
+<span class="hljs-keyword">from</span> dataclasses <span class="hljs-keyword">import</span> dataclass
+<span class="hljs-keyword">import</span> json
+<span class="hljs-keyword">import</span> math
+<span class="hljs-keyword">from</span> pathlib <span class="hljs-keyword">import</span> Path
+<span class="hljs-keyword">import</span> re
+
+
+<span class="hljs-meta">@dataclass(<span class="hljs-params">frozen=<span class="hljs-literal">True</span></span>)</span>
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">Chunk</span>:
+    <span class="hljs-built_in">id</span>: <span class="hljs-built_in">str</span>
+    doc_id: <span class="hljs-built_in">str</span>
+    version: <span class="hljs-built_in">str</span>
+    position: <span class="hljs-built_in">int</span>
+    text: <span class="hljs-built_in">str</span>
+    source: <span class="hljs-built_in">str</span>
+    scope: <span class="hljs-built_in">str</span> = <span class="hljs-string">&quot;public&quot;</span>
+    active: <span class="hljs-built_in">bool</span> = <span class="hljs-literal">True</span>
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">__post_init__</span>(<span class="hljs-params">self</span>):
+        <span class="hljs-keyword">if</span> <span class="hljs-keyword">not</span> <span class="hljs-built_in">all</span>(<span class="hljs-built_in">isinstance</span>(v, <span class="hljs-built_in">str</span>) <span class="hljs-keyword">and</span> v.strip() <span class="hljs-keyword">for</span> v <span class="hljs-keyword">in</span>
+                   (<span class="hljs-variable language_">self</span>.<span class="hljs-built_in">id</span>, <span class="hljs-variable language_">self</span>.doc_id, <span class="hljs-variable language_">self</span>.version, <span class="hljs-variable language_">self</span>.text, <span class="hljs-variable language_">self</span>.source, <span class="hljs-variable language_">self</span>.scope)):
+            <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;chunk strings must be non-empty&quot;</span>)
+        <span class="hljs-keyword">if</span> <span class="hljs-built_in">type</span>(<span class="hljs-variable language_">self</span>.position) <span class="hljs-keyword">is</span> <span class="hljs-keyword">not</span> <span class="hljs-built_in">int</span> <span class="hljs-keyword">or</span> <span class="hljs-variable language_">self</span>.position &lt; <span class="hljs-number">0</span>:
+            <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;position must be a nonnegative integer&quot;</span>)
+        <span class="hljs-keyword">if</span> <span class="hljs-built_in">type</span>(<span class="hljs-variable language_">self</span>.active) <span class="hljs-keyword">is</span> <span class="hljs-keyword">not</span> <span class="hljs-built_in">bool</span>:
+            <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;active must be a boolean&quot;</span>)
+
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">tokenize</span>(<span class="hljs-params">text</span>):
+    <span class="hljs-string">&quot;&quot;&quot;English terms and overlapping Chinese bigrams; not a semantic encoder.&quot;&quot;&quot;</span>
+    tokens = []
+    <span class="hljs-keyword">for</span> part <span class="hljs-keyword">in</span> re.findall(<span class="hljs-string">r&quot;[a-z0-9_]+|[\u4e00-\u9fff]+&quot;</span>, text.lower()):
+        <span class="hljs-keyword">if</span> re.fullmatch(<span class="hljs-string">r&quot;[\u4e00-\u9fff]+&quot;</span>, part):
+            tokens.extend(part[i:i + <span class="hljs-number">2</span>] <span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(<span class="hljs-built_in">len</span>(part) - <span class="hljs-number">1</span>))
+            <span class="hljs-keyword">if</span> <span class="hljs-built_in">len</span>(part) == <span class="hljs-number">1</span>:
+                tokens.append(part)
+        <span class="hljs-keyword">else</span>:
+            tokens.append(part)
+    <span class="hljs-keyword">return</span> tokens
+
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">split_text</span>(<span class="hljs-params">text, size=<span class="hljs-number">400</span>, overlap=<span class="hljs-number">80</span></span>):
+    <span class="hljs-keyword">if</span> <span class="hljs-built_in">type</span>(size) <span class="hljs-keyword">is</span> <span class="hljs-keyword">not</span> <span class="hljs-built_in">int</span> <span class="hljs-keyword">or</span> <span class="hljs-built_in">type</span>(overlap) <span class="hljs-keyword">is</span> <span class="hljs-keyword">not</span> <span class="hljs-built_in">int</span> <span class="hljs-keyword">or</span> <span class="hljs-keyword">not</span> <span class="hljs-number">0</span> &lt;= overlap &lt; size:
+        <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;require integer 0 &lt;= overlap &lt; size&quot;</span>)
+    <span class="hljs-keyword">return</span> [text[i:i + size] <span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(<span class="hljs-number">0</span>, <span class="hljs-built_in">len</span>(text), size - overlap)]
+
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">load_chunks</span>(<span class="hljs-params">path</span>):
+    <span class="hljs-keyword">return</span> [Chunk(**json.loads(line)) <span class="hljs-keyword">for</span> line <span class="hljs-keyword">in</span> Path(path).read_text().splitlines()
+            <span class="hljs-keyword">if</span> line.strip()]
+
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">rrf</span>(<span class="hljs-params">rankings, constant=<span class="hljs-number">60</span></span>):
+    <span class="hljs-keyword">if</span> constant &lt;= <span class="hljs-number">0</span>:
+        <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;RRF constant must be positive&quot;</span>)
+    scores = defaultdict(<span class="hljs-built_in">float</span>)
+    <span class="hljs-keyword">for</span> ranking <span class="hljs-keyword">in</span> rankings:
+        seen = <span class="hljs-built_in">set</span>()
+        <span class="hljs-keyword">for</span> rank, cid <span class="hljs-keyword">in</span> <span class="hljs-built_in">enumerate</span>(<span class="hljs-built_in">dict</span>.fromkeys(ranking), start=<span class="hljs-number">1</span>):
+            <span class="hljs-keyword">if</span> cid <span class="hljs-keyword">not</span> <span class="hljs-keyword">in</span> seen:
+                scores[cid] += <span class="hljs-number">1</span> / (constant + rank)
+                seen.add(cid)
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">sorted</span>(scores.items(), key=<span class="hljs-keyword">lambda</span> x: (-x[<span class="hljs-number">1</span>], x[<span class="hljs-number">0</span>]))
+
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">Retriever</span>:
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">__init__</span>(<span class="hljs-params">self, chunks</span>):
+        <span class="hljs-variable language_">self</span>.chunks = <span class="hljs-built_in">list</span>(chunks)
+        <span class="hljs-keyword">if</span> <span class="hljs-built_in">len</span>({c.<span class="hljs-built_in">id</span> <span class="hljs-keyword">for</span> c <span class="hljs-keyword">in</span> <span class="hljs-variable language_">self</span>.chunks}) != <span class="hljs-built_in">len</span>(<span class="hljs-variable language_">self</span>.chunks):
+            <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;duplicate chunk ID&quot;</span>)
+        locations = [(c.doc_id, c.version, c.position) <span class="hljs-keyword">for</span> c <span class="hljs-keyword">in</span> <span class="hljs-variable language_">self</span>.chunks]
+        <span class="hljs-keyword">if</span> <span class="hljs-built_in">len</span>(<span class="hljs-built_in">set</span>(locations)) != <span class="hljs-built_in">len</span>(locations):
+            <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;duplicate document/version/position&quot;</span>)
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">visible</span>(<span class="hljs-params">self, user</span>):
+        <span class="hljs-keyword">if</span> <span class="hljs-keyword">not</span> <span class="hljs-built_in">isinstance</span>(user, <span class="hljs-built_in">str</span>) <span class="hljs-keyword">or</span> <span class="hljs-keyword">not</span> user.strip() <span class="hljs-keyword">or</span> user == <span class="hljs-string">&quot;public&quot;</span>:
+            <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;user must be a non-empty demo identity, not &#x27;public&#x27;&quot;</span>)
+        <span class="hljs-comment"># Demo identity comes from CLI, not authentication. Do not expose as an API.</span>
+        <span class="hljs-keyword">return</span> [c <span class="hljs-keyword">for</span> c <span class="hljs-keyword">in</span> <span class="hljs-variable language_">self</span>.chunks <span class="hljs-keyword">if</span> c.active <span class="hljs-keyword">and</span> c.scope <span class="hljs-keyword">in</span> (<span class="hljs-string">&quot;public&quot;</span>, user)]
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">search</span>(<span class="hljs-params">self, query, user=<span class="hljs-string">&quot;alice&quot;</span>, mode=<span class="hljs-string">&quot;fusion&quot;</span>, k=<span class="hljs-number">3</span></span>):
+        <span class="hljs-keyword">if</span> <span class="hljs-built_in">type</span>(k) <span class="hljs-keyword">is</span> <span class="hljs-keyword">not</span> <span class="hljs-built_in">int</span> <span class="hljs-keyword">or</span> <span class="hljs-keyword">not</span> <span class="hljs-number">1</span> &lt;= k &lt;= <span class="hljs-number">100</span>:
+            <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;k must be 1..100&quot;</span>)
+        <span class="hljs-keyword">if</span> mode <span class="hljs-keyword">not</span> <span class="hljs-keyword">in</span> (<span class="hljs-string">&quot;bm25&quot;</span>, <span class="hljs-string">&quot;cosine&quot;</span>, <span class="hljs-string">&quot;fusion&quot;</span>):
+            <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;unknown mode&quot;</span>)
+        <span class="hljs-keyword">if</span> <span class="hljs-keyword">not</span> <span class="hljs-built_in">isinstance</span>(query, <span class="hljs-built_in">str</span>) <span class="hljs-keyword">or</span> <span class="hljs-built_in">len</span>(query) &gt; <span class="hljs-number">2000</span>:
+            <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;query must be a string of at most 2000 characters&quot;</span>)
+        docs = <span class="hljs-variable language_">self</span>.visible(user)  <span class="hljs-comment"># Filter before statistics, scoring, and model input.</span>
+        q = Counter(tokenize(query))
+        <span class="hljs-keyword">if</span> <span class="hljs-keyword">not</span> q <span class="hljs-keyword">or</span> <span class="hljs-keyword">not</span> docs:
+            <span class="hljs-keyword">return</span> []
+        counts = {c.<span class="hljs-built_in">id</span>: Counter(tokenize(c.text)) <span class="hljs-keyword">for</span> c <span class="hljs-keyword">in</span> docs}
+        lengths = {cid: <span class="hljs-built_in">sum</span>(tf.values()) <span class="hljs-keyword">for</span> cid, tf <span class="hljs-keyword">in</span> counts.items()}
+        average = <span class="hljs-built_in">sum</span>(lengths.values()) / <span class="hljs-built_in">len</span>(docs) <span class="hljs-keyword">or</span> <span class="hljs-number">1</span>
+        df = Counter(t <span class="hljs-keyword">for</span> tf <span class="hljs-keyword">in</span> counts.values() <span class="hljs-keyword">for</span> t <span class="hljs-keyword">in</span> tf)
+        bm25, cosine = [], []
+        qnorm = math.sqrt(<span class="hljs-built_in">sum</span>(v * v <span class="hljs-keyword">for</span> v <span class="hljs-keyword">in</span> q.values()))
+        <span class="hljs-keyword">for</span> c <span class="hljs-keyword">in</span> docs:
+            tf = counts[c.<span class="hljs-built_in">id</span>]
+            score = <span class="hljs-number">0.0</span>
+            <span class="hljs-keyword">for</span> term <span class="hljs-keyword">in</span> q:
+                n = tf[term]
+                <span class="hljs-keyword">if</span> n:
+                    idf = math.log(<span class="hljs-number">1</span> + (<span class="hljs-built_in">len</span>(docs) - df[term] + <span class="hljs-number">0.5</span>) / (df[term] + <span class="hljs-number">0.5</span>))
+                    score += idf * n * <span class="hljs-number">2.5</span> / (n + <span class="hljs-number">1.5</span> * (<span class="hljs-number">0.25</span> + <span class="hljs-number">0.75</span> * lengths[c.<span class="hljs-built_in">id</span>] / average))
+            <span class="hljs-keyword">if</span> score &gt; <span class="hljs-number">0</span>:
+                bm25.append((c.<span class="hljs-built_in">id</span>, score))
+            norm = math.sqrt(<span class="hljs-built_in">sum</span>(v * v <span class="hljs-keyword">for</span> v <span class="hljs-keyword">in</span> tf.values()))
+            similarity = <span class="hljs-built_in">sum</span>(q[t] * tf[t] <span class="hljs-keyword">for</span> t <span class="hljs-keyword">in</span> q) / (qnorm * norm) <span class="hljs-keyword">if</span> norm <span class="hljs-keyword">else</span> <span class="hljs-number">0</span>
+            <span class="hljs-keyword">if</span> similarity &gt; <span class="hljs-number">0</span>:
+                cosine.append((c.<span class="hljs-built_in">id</span>, similarity))
+        bm25.sort(key=<span class="hljs-keyword">lambda</span> x: (-x[<span class="hljs-number">1</span>], x[<span class="hljs-number">0</span>]))
+        cosine.sort(key=<span class="hljs-keyword">lambda</span> x: (-x[<span class="hljs-number">1</span>], x[<span class="hljs-number">0</span>]))
+        ranked = {<span class="hljs-string">&quot;bm25&quot;</span>: bm25, <span class="hljs-string">&quot;cosine&quot;</span>: cosine}.get(mode)
+        <span class="hljs-keyword">if</span> ranked <span class="hljs-keyword">is</span> <span class="hljs-literal">None</span>:
+            ranked = rrf([[cid <span class="hljs-keyword">for</span> cid, _ <span class="hljs-keyword">in</span> bm25], [cid <span class="hljs-keyword">for</span> cid, _ <span class="hljs-keyword">in</span> cosine]])
+        by_id = {c.<span class="hljs-built_in">id</span>: c <span class="hljs-keyword">for</span> c <span class="hljs-keyword">in</span> docs}
+        <span class="hljs-keyword">return</span> [(by_id[cid], score) <span class="hljs-keyword">for</span> cid, score <span class="hljs-keyword">in</span> ranked[:k]]
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">expand</span>(<span class="hljs-params">self, hits, user=<span class="hljs-string">&quot;alice&quot;</span>, radius=<span class="hljs-number">1</span></span>):
+        <span class="hljs-keyword">if</span> <span class="hljs-built_in">type</span>(radius) <span class="hljs-keyword">is</span> <span class="hljs-keyword">not</span> <span class="hljs-built_in">int</span> <span class="hljs-keyword">or</span> <span class="hljs-keyword">not</span> <span class="hljs-number">0</span> &lt;= radius &lt;= <span class="hljs-number">5</span>:
+            <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;radius must be 0..5&quot;</span>)
+        visible = <span class="hljs-variable language_">self</span>.visible(user)
+        by_id = {c.<span class="hljs-built_in">id</span>: c <span class="hljs-keyword">for</span> c <span class="hljs-keyword">in</span> visible}
+        result = []
+        seen = <span class="hljs-built_in">set</span>()
+        <span class="hljs-keyword">for</span> candidate, _ <span class="hljs-keyword">in</span> hits:
+            center = by_id.get(candidate.<span class="hljs-built_in">id</span>)
+            <span class="hljs-keyword">if</span> center <span class="hljs-keyword">is</span> <span class="hljs-literal">None</span>:
+                <span class="hljs-keyword">continue</span>
+            neighbors = <span class="hljs-built_in">sorted</span>((c <span class="hljs-keyword">for</span> c <span class="hljs-keyword">in</span> visible <span class="hljs-keyword">if</span> c.doc_id == center.doc_id
+                                <span class="hljs-keyword">and</span> c.version == center.version
+                                <span class="hljs-keyword">and</span> <span class="hljs-built_in">abs</span>(c.position - center.position) &lt;= radius),
+                               key=<span class="hljs-keyword">lambda</span> c: c.position)
+            <span class="hljs-keyword">for</span> chunk <span class="hljs-keyword">in</span> neighbors:
+                <span class="hljs-keyword">if</span> chunk.<span class="hljs-built_in">id</span> <span class="hljs-keyword">not</span> <span class="hljs-keyword">in</span> seen:
+                    seen.add(chunk.<span class="hljs-built_in">id</span>)
+                    result.append(chunk)
+        <span class="hljs-keyword">return</span> result
+
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">pack_context</span>(<span class="hljs-params">chunks, budget=<span class="hljs-number">1200</span></span>):
+    <span class="hljs-keyword">if</span> <span class="hljs-built_in">type</span>(budget) <span class="hljs-keyword">is</span> <span class="hljs-keyword">not</span> <span class="hljs-built_in">int</span> <span class="hljs-keyword">or</span> budget &lt; <span class="hljs-number">0</span>:
+        <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;budget must be a nonnegative character count&quot;</span>)
+    blocks, selected, seen = [], [], <span class="hljs-built_in">set</span>()
+    used = <span class="hljs-number">0</span>
+    <span class="hljs-keyword">for</span> chunk <span class="hljs-keyword">in</span> chunks:
+        <span class="hljs-keyword">if</span> chunk.<span class="hljs-built_in">id</span> <span class="hljs-keyword">in</span> seen:
+            <span class="hljs-keyword">continue</span>
+        seen.add(chunk.<span class="hljs-built_in">id</span>)
+        block = <span class="hljs-string">f&quot;[<span class="hljs-subst">{chunk.<span class="hljs-built_in">id</span>}</span>] <span class="hljs-subst">{chunk.source}</span>\n<span class="hljs-subst">{chunk.text}</span>&quot;</span>
+        cost = <span class="hljs-built_in">len</span>(block) + (<span class="hljs-number">2</span> <span class="hljs-keyword">if</span> blocks <span class="hljs-keyword">else</span> <span class="hljs-number">0</span>)
+        <span class="hljs-keyword">if</span> used + cost &lt;= budget:
+            blocks.append(block)
+            selected.append(chunk.<span class="hljs-built_in">id</span>)
+            used += cost
+    <span class="hljs-keyword">return</span> <span class="hljs-string">&quot;\n\n&quot;</span>.join(blocks), selected
+
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">retrieval_metrics</span>(<span class="hljs-params">expected, actual</span>):
+    gold, ranked = <span class="hljs-built_in">set</span>(expected), <span class="hljs-built_in">list</span>(<span class="hljs-built_in">dict</span>.fromkeys(actual))
+    <span class="hljs-keyword">if</span> <span class="hljs-keyword">not</span> gold:
+        <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;gold evidence must not be empty&quot;</span>)
+    recall = <span class="hljs-built_in">len</span>(gold.intersection(ranked)) / <span class="hljs-built_in">len</span>(gold)
+    reciprocal = <span class="hljs-built_in">next</span>((<span class="hljs-number">1</span> / i <span class="hljs-keyword">for</span> i, cid <span class="hljs-keyword">in</span> <span class="hljs-built_in">enumerate</span>(ranked, <span class="hljs-number">1</span>) <span class="hljs-keyword">if</span> cid <span class="hljs-keyword">in</span> gold), <span class="hljs-number">0.0</span>)
+    <span class="hljs-keyword">return</span> {<span class="hljs-string">&quot;recall&quot;</span>: recall, <span class="hljs-string">&quot;mrr&quot;</span>: reciprocal, <span class="hljs-string">&quot;complete&quot;</span>: gold.issubset(ranked)}
+
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">main</span>():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(<span class="hljs-string">&quot;--query&quot;</span>, default=<span class="hljs-string">&quot;支付回调验签和幂等如何处理&quot;</span>)
+    parser.add_argument(<span class="hljs-string">&quot;--user&quot;</span>, default=<span class="hljs-string">&quot;alice&quot;</span>)
+    parser.add_argument(<span class="hljs-string">&quot;--mode&quot;</span>, choices=[<span class="hljs-string">&quot;bm25&quot;</span>, <span class="hljs-string">&quot;cosine&quot;</span>, <span class="hljs-string">&quot;fusion&quot;</span>], default=<span class="hljs-string">&quot;fusion&quot;</span>)
+    parser.add_argument(<span class="hljs-string">&quot;--k&quot;</span>, <span class="hljs-built_in">type</span>=<span class="hljs-built_in">int</span>, default=<span class="hljs-number">2</span>)
+    parser.add_argument(<span class="hljs-string">&quot;--window&quot;</span>, <span class="hljs-built_in">type</span>=<span class="hljs-built_in">int</span>, default=<span class="hljs-number">0</span>)
+    parser.add_argument(<span class="hljs-string">&quot;--budget&quot;</span>, <span class="hljs-built_in">type</span>=<span class="hljs-built_in">int</span>, default=<span class="hljs-number">1200</span>)
+    parser.add_argument(<span class="hljs-string">&quot;--data&quot;</span>, <span class="hljs-built_in">type</span>=Path, default=Path(__file__).with_name(<span class="hljs-string">&quot;documents.jsonl&quot;</span>))
+    args = parser.parse_args()
+    retriever = Retriever(load_chunks(args.data))
+    hits = retriever.search(args.query, args.user, args.mode, args.k)
+    expanded = retriever.expand(hits, args.user, args.window)
+    context, ids = pack_context(expanded, args.budget)
+    <span class="hljs-built_in">print</span>(json.dumps({<span class="hljs-string">&quot;mode&quot;</span>: args.mode, <span class="hljs-string">&quot;retrieved&quot;</span>: [c.<span class="hljs-built_in">id</span> <span class="hljs-keyword">for</span> c, _ <span class="hljs-keyword">in</span> hits],
+                      <span class="hljs-string">&quot;injected&quot;</span>: ids, <span class="hljs-string">&quot;context_characters&quot;</span>: <span class="hljs-built_in">len</span>(context)}, ensure_ascii=<span class="hljs-literal">False</span>, indent=<span class="hljs-number">2</span>))
+    <span class="hljs-built_in">print</span>(context <span class="hljs-keyword">or</span> <span class="hljs-string">&quot;没有可交付证据。此示例不生成答案。&quot;</span>)
+
+
+<span class="hljs-keyword">if</span> __name__ == <span class="hljs-string">&quot;__main__&quot;</span>:
+    main()</code></pre><h2 id="evaluate-py">evaluate.py</h2><pre tabindex="0"><code class="hljs"><span class="hljs-string">&quot;&quot;&quot;Fixed teaching questions. This is not a production benchmark.&quot;&quot;&quot;</span>
+<span class="hljs-keyword">import</span> json
+<span class="hljs-keyword">from</span> pathlib <span class="hljs-keyword">import</span> Path
+<span class="hljs-keyword">from</span> mini_rag <span class="hljs-keyword">import</span> Retriever, load_chunks, pack_context, retrieval_metrics
+
+ROOT = Path(__file__).resolve().parents[<span class="hljs-number">1</span>]
+CASES = [
+    (<span class="hljs-string">&quot;回调处理顺序&quot;</span>, [<span class="hljs-string">&quot;callback-v2:0&quot;</span>]),
+    (<span class="hljs-string">&quot;支付回调验签和幂等如何处理&quot;</span>, [<span class="hljs-string">&quot;callback-v2:0&quot;</span>, <span class="hljs-string">&quot;callback-v2:1&quot;</span>]),
+    (<span class="hljs-string">&quot;重复通知如何处理&quot;</span>, [<span class="hljs-string">&quot;callback-v2:1&quot;</span>]),
+    (<span class="hljs-string">&quot;退款失败后如何处理&quot;</span>, [<span class="hljs-string">&quot;refund-v2:0&quot;</span>]),
+    (<span class="hljs-string">&quot;退款申请单的幂等键&quot;</span>, [<span class="hljs-string">&quot;refund-v2:1&quot;</span>]),
+    (<span class="hljs-string">&quot;回调模块技术负责人是谁&quot;</span>, [<span class="hljs-string">&quot;owner-v1:0&quot;</span>, <span class="hljs-string">&quot;team-v1:0&quot;</span>]),
+]
+
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">run</span>():
+    retriever = Retriever(load_chunks(ROOT / <span class="hljs-string">&quot;examples/documents.jsonl&quot;</span>))
+    report = []
+    <span class="hljs-keyword">for</span> mode, k, radius <span class="hljs-keyword">in</span> [(<span class="hljs-string">&quot;bm25&quot;</span>, <span class="hljs-number">2</span>, <span class="hljs-number">0</span>), (<span class="hljs-string">&quot;cosine&quot;</span>, <span class="hljs-number">2</span>, <span class="hljs-number">0</span>),
+                            (<span class="hljs-string">&quot;fusion&quot;</span>, <span class="hljs-number">2</span>, <span class="hljs-number">0</span>), (<span class="hljs-string">&quot;fusion&quot;</span>, <span class="hljs-number">1</span>, <span class="hljs-number">1</span>)]:
+        rows = []
+        <span class="hljs-keyword">for</span> query, expected <span class="hljs-keyword">in</span> CASES:
+            hits = retriever.search(query, user=<span class="hljs-string">&quot;alice&quot;</span>, mode=mode, k=k)
+            chunks = retriever.expand(hits, user=<span class="hljs-string">&quot;alice&quot;</span>, radius=radius)
+            context, injected = pack_context(chunks, <span class="hljs-number">1200</span>)
+            candidates = [c.<span class="hljs-built_in">id</span> <span class="hljs-keyword">for</span> c, _ <span class="hljs-keyword">in</span> hits]
+            rows.append({<span class="hljs-string">&quot;query&quot;</span>: query, <span class="hljs-string">&quot;gold&quot;</span>: expected, <span class="hljs-string">&quot;retrieved&quot;</span>: candidates,
+                         <span class="hljs-string">&quot;injected&quot;</span>: injected, <span class="hljs-string">&quot;context_characters&quot;</span>: <span class="hljs-built_in">len</span>(context),
+                         <span class="hljs-string">&quot;retrieval&quot;</span>: retrieval_metrics(expected, candidates),
+                         <span class="hljs-string">&quot;delivery&quot;</span>: retrieval_metrics(expected, injected)})
+        summary = {
+            <span class="hljs-string">&quot;candidate_recall&quot;</span>: <span class="hljs-built_in">sum</span>(r[<span class="hljs-string">&quot;retrieval&quot;</span>][<span class="hljs-string">&quot;recall&quot;</span>] <span class="hljs-keyword">for</span> r <span class="hljs-keyword">in</span> rows) / <span class="hljs-built_in">len</span>(rows),
+            <span class="hljs-string">&quot;delivery_recall&quot;</span>: <span class="hljs-built_in">sum</span>(r[<span class="hljs-string">&quot;delivery&quot;</span>][<span class="hljs-string">&quot;recall&quot;</span>] <span class="hljs-keyword">for</span> r <span class="hljs-keyword">in</span> rows) / <span class="hljs-built_in">len</span>(rows),
+            <span class="hljs-string">&quot;complete_rate&quot;</span>: <span class="hljs-built_in">sum</span>(r[<span class="hljs-string">&quot;delivery&quot;</span>][<span class="hljs-string">&quot;complete&quot;</span>] <span class="hljs-keyword">for</span> r <span class="hljs-keyword">in</span> rows) / <span class="hljs-built_in">len</span>(rows),
+            <span class="hljs-string">&quot;mrr&quot;</span>: <span class="hljs-built_in">sum</span>(r[<span class="hljs-string">&quot;retrieval&quot;</span>][<span class="hljs-string">&quot;mrr&quot;</span>] <span class="hljs-keyword">for</span> r <span class="hljs-keyword">in</span> rows) / <span class="hljs-built_in">len</span>(rows),
+        }
+        result = {<span class="hljs-string">&quot;mode&quot;</span>: mode, <span class="hljs-string">&quot;k&quot;</span>: k, <span class="hljs-string">&quot;radius&quot;</span>: radius, <span class="hljs-string">&quot;summary&quot;</span>: summary, <span class="hljs-string">&quot;cases&quot;</span>: rows}
+        report.append(result)
+        <span class="hljs-built_in">print</span>(<span class="hljs-string">f&quot;<span class="hljs-subst">{mode:<span class="hljs-number">7</span>}</span> k=<span class="hljs-subst">{k}</span> radius=<span class="hljs-subst">{radius}</span> &quot;</span> + json.dumps(summary, ensure_ascii=<span class="hljs-literal">False</span>))
+    path = ROOT / <span class="hljs-string">&quot;sources/offline-evaluation.json&quot;</span>
+    path.parent.mkdir(parents=<span class="hljs-literal">True</span>, exist_ok=<span class="hljs-literal">True</span>)
+    path.write_text(json.dumps({<span class="hljs-string">&quot;scope&quot;</span>: <span class="hljs-string">&quot;6 fixed teaching questions; no LLM&quot;</span>, <span class="hljs-string">&quot;runs&quot;</span>: report},
+                               ensure_ascii=<span class="hljs-literal">False</span>, indent=<span class="hljs-number">2</span>) + <span class="hljs-string">&quot;\n&quot;</span>)
+    <span class="hljs-built_in">print</span>(<span class="hljs-string">&quot;Saved sources/offline-evaluation.json&quot;</span>)
+
+
+<span class="hljs-keyword">if</span> __name__ == <span class="hljs-string">&quot;__main__&quot;</span>:
+    run()</code></pre><h2 id="test-mini-rag-py">test_mini_rag.py</h2><pre tabindex="0"><code class="hljs"><span class="hljs-keyword">import</span> unittest
+<span class="hljs-keyword">from</span> pathlib <span class="hljs-keyword">import</span> Path
+<span class="hljs-keyword">from</span> mini_rag <span class="hljs-keyword">import</span> Chunk, Retriever, load_chunks, pack_context, retrieval_metrics, rrf, split_text, tokenize
+
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">chunk</span>(<span class="hljs-params">cid, doc=<span class="hljs-string">&quot;doc&quot;</span>, version=<span class="hljs-string">&quot;v2&quot;</span>, position=<span class="hljs-number">0</span>, scope=<span class="hljs-string">&quot;public&quot;</span>, active=<span class="hljs-literal">True</span>, text=<span class="hljs-string">&quot;支付回调验签&quot;</span></span>):
+    <span class="hljs-keyword">return</span> Chunk(cid, doc, version, position, text, <span class="hljs-string">&quot;教学来源&quot;</span>, scope, active)
+
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">RetrievalTests</span>(unittest.TestCase):
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">setUp</span>(<span class="hljs-params">self</span>):
+        <span class="hljs-variable language_">self</span>.r = Retriever(load_chunks(Path(__file__).with_name(<span class="hljs-string">&quot;documents.jsonl&quot;</span>)))
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_bm25_finds_evidence</span>(<span class="hljs-params">self</span>):
+        <span class="hljs-variable language_">self</span>.assertEqual(<span class="hljs-variable language_">self</span>.r.search(<span class="hljs-string">&quot;回调处理顺序&quot;</span>, mode=<span class="hljs-string">&quot;bm25&quot;</span>, k=<span class="hljs-number">1</span>)[<span class="hljs-number">0</span>][<span class="hljs-number">0</span>].<span class="hljs-built_in">id</span>, <span class="hljs-string">&quot;callback-v2:0&quot;</span>)
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_chinese_tokenization</span>(<span class="hljs-params">self</span>):
+        <span class="hljs-variable language_">self</span>.assertIn(<span class="hljs-string">&quot;验签&quot;</span>, tokenize(<span class="hljs-string">&quot;支付回调验签&quot;</span>))
+        <span class="hljs-variable language_">self</span>.assertIn(<span class="hljs-string">&quot;callback_v2&quot;</span>, tokenize(<span class="hljs-string">&quot;callback_v2&quot;</span>))
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_filter_happens_before_scoring</span>(<span class="hljs-params">self</span>):
+        <span class="hljs-keyword">for</span> mode <span class="hljs-keyword">in</span> (<span class="hljs-string">&quot;bm25&quot;</span>, <span class="hljs-string">&quot;cosine&quot;</span>, <span class="hljs-string">&quot;fusion&quot;</span>):
+            hits = <span class="hljs-variable language_">self</span>.r.search(<span class="hljs-string">&quot;支付回调验签和幂等&quot;</span>, user=<span class="hljs-string">&quot;alice&quot;</span>, mode=mode, k=<span class="hljs-number">100</span>)
+            <span class="hljs-variable language_">self</span>.assertNotIn(<span class="hljs-string">&quot;bob-v1:0&quot;</span>, [c.<span class="hljs-built_in">id</span> <span class="hljs-keyword">for</span> c, _ <span class="hljs-keyword">in</span> hits])
+            <span class="hljs-variable language_">self</span>.assertNotIn(<span class="hljs-string">&quot;callback-v1:0&quot;</span>, [c.<span class="hljs-built_in">id</span> <span class="hljs-keyword">for</span> c, _ <span class="hljs-keyword">in</span> hits])
+            visible_only = Retriever(<span class="hljs-variable language_">self</span>.r.visible(<span class="hljs-string">&quot;alice&quot;</span>))
+            <span class="hljs-variable language_">self</span>.assertEqual(hits, visible_only.search(<span class="hljs-string">&quot;支付回调验签和幂等&quot;</span>, <span class="hljs-string">&quot;alice&quot;</span>, mode, <span class="hljs-number">100</span>))
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_windows_keep_version_document_and_acl</span>(<span class="hljs-params">self</span>):
+        r = Retriever([chunk(<span class="hljs-string">&quot;x&quot;</span>, position=<span class="hljs-number">0</span>), chunk(<span class="hljs-string">&quot;next&quot;</span>, position=<span class="hljs-number">1</span>),
+                       chunk(<span class="hljs-string">&quot;old&quot;</span>, version=<span class="hljs-string">&quot;v1&quot;</span>, position=<span class="hljs-number">1</span>),
+                       chunk(<span class="hljs-string">&quot;other&quot;</span>, doc=<span class="hljs-string">&quot;other&quot;</span>, position=<span class="hljs-number">1</span>),
+                       chunk(<span class="hljs-string">&quot;secret&quot;</span>, position=<span class="hljs-number">2</span>, scope=<span class="hljs-string">&quot;bob&quot;</span>)])
+        result = r.expand([(r.chunks[<span class="hljs-number">0</span>], <span class="hljs-number">1</span>)], <span class="hljs-string">&quot;alice&quot;</span>, <span class="hljs-number">2</span>)
+        <span class="hljs-variable language_">self</span>.assertEqual([c.<span class="hljs-built_in">id</span> <span class="hljs-keyword">for</span> c <span class="hljs-keyword">in</span> result], [<span class="hljs-string">&quot;x&quot;</span>, <span class="hljs-string">&quot;next&quot;</span>])
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_unauthorized_center_cannot_expand</span>(<span class="hljs-params">self</span>):
+        private = <span class="hljs-built_in">next</span>(c <span class="hljs-keyword">for</span> c <span class="hljs-keyword">in</span> <span class="hljs-variable language_">self</span>.r.chunks <span class="hljs-keyword">if</span> c.scope == <span class="hljs-string">&quot;bob&quot;</span>)
+        <span class="hljs-variable language_">self</span>.assertEqual(<span class="hljs-variable language_">self</span>.r.expand([(private, <span class="hljs-number">1</span>)], <span class="hljs-string">&quot;alice&quot;</span>), [])
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_rrf_joins_by_id</span>(<span class="hljs-params">self</span>):
+        ranking = rrf([[<span class="hljs-string">&quot;a&quot;</span>, <span class="hljs-string">&quot;b&quot;</span>], [<span class="hljs-string">&quot;b&quot;</span>, <span class="hljs-string">&quot;a&quot;</span>]])
+        <span class="hljs-variable language_">self</span>.assertAlmostEqual(ranking[<span class="hljs-number">0</span>][<span class="hljs-number">1</span>], ranking[<span class="hljs-number">1</span>][<span class="hljs-number">1</span>])
+        <span class="hljs-variable language_">self</span>.assertEqual([cid <span class="hljs-keyword">for</span> cid, _ <span class="hljs-keyword">in</span> ranking], [<span class="hljs-string">&quot;a&quot;</span>, <span class="hljs-string">&quot;b&quot;</span>])
+        <span class="hljs-variable language_">self</span>.assertEqual(rrf([[<span class="hljs-string">&quot;a&quot;</span>, <span class="hljs-string">&quot;a&quot;</span>, <span class="hljs-string">&quot;b&quot;</span>]]), rrf([[<span class="hljs-string">&quot;a&quot;</span>, <span class="hljs-string">&quot;b&quot;</span>]]))
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_pack_counts_headers_and_separators</span>(<span class="hljs-params">self</span>):
+        docs = <span class="hljs-variable language_">self</span>.r.visible(<span class="hljs-string">&quot;alice&quot;</span>)
+        context, ids = pack_context(docs, budget=<span class="hljs-number">160</span>)
+        <span class="hljs-variable language_">self</span>.assertLessEqual(<span class="hljs-built_in">len</span>(context), <span class="hljs-number">160</span>)
+        <span class="hljs-variable language_">self</span>.assertTrue(ids)
+        <span class="hljs-variable language_">self</span>.assertEqual(pack_context(docs, <span class="hljs-number">0</span>), (<span class="hljs-string">&quot;&quot;</span>, []))
+        <span class="hljs-variable language_">self</span>.assertEqual(pack_context([docs[<span class="hljs-number">0</span>], docs[<span class="hljs-number">0</span>]], <span class="hljs-number">1000</span>)[<span class="hljs-number">1</span>], [docs[<span class="hljs-number">0</span>].<span class="hljs-built_in">id</span>])
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_no_match_is_empty</span>(<span class="hljs-params">self</span>):
+        <span class="hljs-variable language_">self</span>.assertEqual(<span class="hljs-variable language_">self</span>.r.search(<span class="hljs-string">&quot;xyzunfindable&quot;</span>), [])
+        <span class="hljs-variable language_">self</span>.assertEqual(<span class="hljs-variable language_">self</span>.r.search(<span class="hljs-string">&quot;&quot;</span>), [])
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_invalid_parameters</span>(<span class="hljs-params">self</span>):
+        <span class="hljs-keyword">for</span> size, overlap <span class="hljs-keyword">in</span> ((<span class="hljs-number">0</span>, <span class="hljs-number">0</span>), (<span class="hljs-number">2</span>, <span class="hljs-number">2</span>), (<span class="hljs-number">2</span>, -<span class="hljs-number">1</span>)):
+            <span class="hljs-keyword">with</span> <span class="hljs-variable language_">self</span>.assertRaises(ValueError):
+                split_text(<span class="hljs-string">&quot;abcdef&quot;</span>, size, overlap)
+        <span class="hljs-keyword">for</span> kwargs <span class="hljs-keyword">in</span> ({<span class="hljs-string">&quot;k&quot;</span>: <span class="hljs-number">0</span>}, {<span class="hljs-string">&quot;mode&quot;</span>: <span class="hljs-string">&quot;unknown&quot;</span>}, {<span class="hljs-string">&quot;user&quot;</span>: <span class="hljs-string">&quot;&quot;</span>}, {<span class="hljs-string">&quot;user&quot;</span>: <span class="hljs-string">&quot;public&quot;</span>}):
+            <span class="hljs-keyword">with</span> <span class="hljs-variable language_">self</span>.assertRaises(ValueError):
+                <span class="hljs-variable language_">self</span>.r.search(<span class="hljs-string">&quot;支付&quot;</span>, **kwargs)
+        <span class="hljs-keyword">with</span> <span class="hljs-variable language_">self</span>.assertRaises(ValueError):
+            <span class="hljs-variable language_">self</span>.r.expand([], radius=-<span class="hljs-number">1</span>)
+        <span class="hljs-keyword">with</span> <span class="hljs-variable language_">self</span>.assertRaises(ValueError):
+            pack_context([], -<span class="hljs-number">1</span>)
+        <span class="hljs-keyword">with</span> <span class="hljs-variable language_">self</span>.assertRaises(ValueError):
+            rrf([[<span class="hljs-string">&quot;a&quot;</span>]], constant=<span class="hljs-number">0</span>)
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_duplicate_identity_is_rejected</span>(<span class="hljs-params">self</span>):
+        <span class="hljs-keyword">with</span> <span class="hljs-variable language_">self</span>.assertRaises(ValueError):
+            Retriever([chunk(<span class="hljs-string">&quot;same&quot;</span>), chunk(<span class="hljs-string">&quot;same&quot;</span>, doc=<span class="hljs-string">&quot;another&quot;</span>)])
+        <span class="hljs-keyword">with</span> <span class="hljs-variable language_">self</span>.assertRaises(ValueError):
+            Retriever([chunk(<span class="hljs-string">&quot;a&quot;</span>), chunk(<span class="hljs-string">&quot;b&quot;</span>)])
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_split_offsets</span>(<span class="hljs-params">self</span>):
+        <span class="hljs-variable language_">self</span>.assertEqual(split_text(<span class="hljs-string">&quot;abcdefghij&quot;</span>, <span class="hljs-number">4</span>, <span class="hljs-number">1</span>), [<span class="hljs-string">&quot;abcd&quot;</span>, <span class="hljs-string">&quot;defg&quot;</span>, <span class="hljs-string">&quot;ghij&quot;</span>, <span class="hljs-string">&quot;j&quot;</span>])
+
+    <span class="hljs-keyword">def</span> <span class="hljs-title function_">test_metrics_need_all_evidence</span>(<span class="hljs-params">self</span>):
+        result = retrieval_metrics([<span class="hljs-string">&quot;a&quot;</span>, <span class="hljs-string">&quot;b&quot;</span>], [<span class="hljs-string">&quot;a&quot;</span>, <span class="hljs-string">&quot;c&quot;</span>])
+        <span class="hljs-variable language_">self</span>.assertEqual(result, {<span class="hljs-string">&quot;recall&quot;</span>: <span class="hljs-number">0.5</span>, <span class="hljs-string">&quot;mrr&quot;</span>: <span class="hljs-number">1.0</span>, <span class="hljs-string">&quot;complete&quot;</span>: <span class="hljs-literal">False</span>})
+        <span class="hljs-variable language_">self</span>.assertEqual(retrieval_metrics([<span class="hljs-string">&quot;a&quot;</span>], [<span class="hljs-string">&quot;a&quot;</span>, <span class="hljs-string">&quot;a&quot;</span>])[<span class="hljs-string">&quot;recall&quot;</span>], <span class="hljs-number">1.0</span>)
+
+
+<span class="hljs-keyword">if</span> __name__ == <span class="hljs-string">&quot;__main__&quot;</span>:
+    unittest.main()</code></pre><h2 id="documents-jsonl">documents.jsonl</h2><pre tabindex="0"><code class="hljs"><span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;callback-v2:0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;doc_id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;callback&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;version&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;v2&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;position&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">0</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;支付回调处理顺序：先验签，再核对商户号、订单号、金额和币种，核对成功后才更新支付状态。&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;source&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;教学支付规范 v2，回调流程第1段&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;scope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;public&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;active&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal"><span class="hljs-keyword">true</span></span><span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;callback-v2:1&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;doc_id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;callback&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;version&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;v2&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;position&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">1</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;支付回调幂等以渠道流水号和事件类型为键。重复通知不重复发货；状态更新成功后发送业务通知，通知失败进入重试队列。&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;source&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;教学支付规范 v2，回调流程第2段&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;scope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;public&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;active&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal"><span class="hljs-keyword">true</span></span><span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;callback-v1:0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;doc_id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;callback&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;version&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;v1&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;position&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">0</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;支付回调可以先更新订单状态，再异步验签。支付回调处理以订单号作为幂等键。&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;source&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;教学支付规范 v1，已废弃反例&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;scope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;public&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;active&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal"><span class="hljs-keyword">false</span></span><span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;refund-v2:0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;doc_id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;refund&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;version&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;v2&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;position&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">0</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;退款失败后保留退款单原状态和失败原因。先查询渠道结果，再决定是否重试，不得仅凭超时再次发起新退款。&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;source&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;教学退款规范 v2，第1段&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;scope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;public&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;active&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal"><span class="hljs-keyword">true</span></span><span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;refund-v2:1&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;doc_id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;refund&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;version&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;v2&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;position&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">1</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;退款申请单使用独立幂等键。人工处理必须保留审批记录，系统不自动提高操作者权限。&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;source&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;教学退款规范 v2，第2段&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;scope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;public&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;active&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal"><span class="hljs-keyword">true</span></span><span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;reconcile-v1:0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;doc_id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;reconcile&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;version&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;v1&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;position&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">0</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;对账任务比较渠道账单与内部支付流水，按渠道流水号关联，分别标记漏单、状态差异和金额差异。&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;source&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;教学对账说明，第1段&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;scope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;public&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;active&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal"><span class="hljs-keyword">true</span></span><span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;owner-v1:0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;doc_id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;owner&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;version&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;v1&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;position&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">0</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;支付回调模块由结算组维护。结算组的技术负责人见团队职责表。&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;source&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;教学模块目录，第1段&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;scope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;public&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;active&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal"><span class="hljs-keyword">true</span></span><span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;team-v1:0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;doc_id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;team&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;version&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;v1&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;position&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">0</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;结算组的技术负责人是陈禾，负责评审与故障协调；此记录不代表批准任何真实退款。&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;source&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;教学团队职责表，第1段&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;scope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;public&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;active&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal"><span class="hljs-keyword">true</span></span><span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;alice-v1:0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;doc_id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;alice-note&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;version&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;v1&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;position&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">0</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;Alice 的私人支付排查笔记：临时商户信息仅本人可读。&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;source&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;教学私人笔记&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;scope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;alice&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;active&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal"><span class="hljs-keyword">true</span></span><span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;bob-v1:0&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;doc_id&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;bob-note&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;version&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;v1&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;position&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-number">0</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;text&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;Bob 的私人支付排查笔记：支付回调验签和幂等的内部草稿，仅 Bob 可读。&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;source&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;教学私人笔记&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;scope&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-string">&quot;bob&quot;</span><span class="hljs-punctuation">,</span><span class="hljs-attr">&quot;active&quot;</span><span class="hljs-punctuation">:</span><span class="hljs-literal"><span class="hljs-keyword">true</span></span><span class="hljs-punctuation">}</span></code></pre></article><nav class="pager" aria-label="篇章导航"><a href="appendix-sources.html"><small>上一篇</small>附录 B：来源、术语与事实边界</a><a href="../index.html">返回目录</a></nav></main><script src="../assets/wiki.js"></script></body></html>

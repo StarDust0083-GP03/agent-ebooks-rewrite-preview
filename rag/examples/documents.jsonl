@@ -1,0 +1,10 @@
+{"id":"callback-v2:0","doc_id":"callback","version":"v2","position":0,"text":"支付回调处理顺序：先验签，再核对商户号、订单号、金额和币种，核对成功后才更新支付状态。","source":"教学支付规范 v2，回调流程第1段","scope":"public","active":true}
+{"id":"callback-v2:1","doc_id":"callback","version":"v2","position":1,"text":"支付回调幂等以渠道流水号和事件类型为键。重复通知不重复发货；状态更新成功后发送业务通知，通知失败进入重试队列。","source":"教学支付规范 v2，回调流程第2段","scope":"public","active":true}
+{"id":"callback-v1:0","doc_id":"callback","version":"v1","position":0,"text":"支付回调可以先更新订单状态，再异步验签。支付回调处理以订单号作为幂等键。","source":"教学支付规范 v1，已废弃反例","scope":"public","active":false}
+{"id":"refund-v2:0","doc_id":"refund","version":"v2","position":0,"text":"退款失败后保留退款单原状态和失败原因。先查询渠道结果，再决定是否重试，不得仅凭超时再次发起新退款。","source":"教学退款规范 v2，第1段","scope":"public","active":true}
+{"id":"refund-v2:1","doc_id":"refund","version":"v2","position":1,"text":"退款申请单使用独立幂等键。人工处理必须保留审批记录，系统不自动提高操作者权限。","source":"教学退款规范 v2，第2段","scope":"public","active":true}
+{"id":"reconcile-v1:0","doc_id":"reconcile","version":"v1","position":0,"text":"对账任务比较渠道账单与内部支付流水，按渠道流水号关联，分别标记漏单、状态差异和金额差异。","source":"教学对账说明，第1段","scope":"public","active":true}
+{"id":"owner-v1:0","doc_id":"owner","version":"v1","position":0,"text":"支付回调模块由结算组维护。结算组的技术负责人见团队职责表。","source":"教学模块目录，第1段","scope":"public","active":true}
+{"id":"team-v1:0","doc_id":"team","version":"v1","position":0,"text":"结算组的技术负责人是陈禾，负责评审与故障协调；此记录不代表批准任何真实退款。","source":"教学团队职责表，第1段","scope":"public","active":true}
+{"id":"alice-v1:0","doc_id":"alice-note","version":"v1","position":0,"text":"Alice 的私人支付排查笔记：临时商户信息仅本人可读。","source":"教学私人笔记","scope":"alice","active":true}
+{"id":"bob-v1:0","doc_id":"bob-note","version":"v1","position":0,"text":"Bob 的私人支付排查笔记：支付回调验签和幂等的内部草稿，仅 Bob 可读。","source":"教学私人笔记","scope":"bob","active":true}

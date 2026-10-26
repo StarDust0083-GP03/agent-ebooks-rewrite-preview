@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>身份与会话：四种 ID，四条边界 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 05</div><div class="rail-title">身份与会话：四种 ID，四条边界</div><ol><li><a href="#一位用户可以使用别人的专家">一位用户可以使用别人的专家</a></li><li><a href="#先授权专家-再授权线程">先授权专家，再授权线程</a></li><li><a href="#session-key-是入口绑定-不是授权凭证">session_key 是入口绑定，不是授权凭证</a></li><li><a href="#用一组具体-id-走一次">用一组具体 ID 走一次</a></li><li><a href="#资源删除也必须沿标识追踪">资源删除也必须沿标识追踪</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 05 章</div><h1>身份与会话：四种 ID，四条边界</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 8 分钟</div></header><div class="prose"><h2 id="一位用户可以使用别人的专家">一位用户可以使用别人的专家<a class="anchor" href="#一位用户可以使用别人的专家" aria-label="链接到本节">#</a></h2>
+<p>前面的配置装配解决“专家有哪些能力”，还没有解决“当前请求属于谁”。Octop 至少要区分 user_id、agent_id、session_key 和 thread_id。把四者合成一个字符串会让权限和生命周期互相干扰。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>标识</th>
+<th>回答的问题</th>
+<th>典型变化</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>user_id</td>
+<td>当前主体是谁</td>
+<td>登录用户改变</td>
+</tr>
+<tr>
+<td>agent_id</td>
+<td>使用哪位专家</td>
+<td>切换专家</td>
+</tr>
+<tr>
+<td>session_key</td>
+<td>哪个入口会话绑定当前线程</td>
+<td>Web、CLI、IM 来源改变</td>
+</tr>
+<tr>
+<td>thread_id</td>
+<td>哪份持续对话与图状态</td>
+<td>新建、切换或分叉线程</td>
+</tr>
+</tbody></table></div>
+<p>Agent 归属是资源关系，thread 归属是对话关系。林岚分享了研究专家，周越可以使用它，但不应因此获得林岚的私有 thread。</p>
+<h2 id="先授权专家-再授权线程">先授权专家，再授权线程<a class="anchor" href="#先授权专家-再授权线程" aria-label="链接到本节">#</a></h2>
+<p>api/common/agent.py 将访问与管理分开。所有者、管理员和满足分享范围的用户可以获得不同访问能力；修改专家配置则有 owner 级检查。用户组分享还会进入 expert_visible_to 等可见性逻辑。</p>
+<p>聊天准备阶段会再次校验指定线程。以下是 resolve_thread_id 中的核心判断，省略了后续绑定操作：</p>
+<pre><code class="language-python">row = thread_registry.get_thread(thread_id)
+if row is None or row.agent_id != agent_id:
+    raise OctopError(ErrorCode.AGENT_NOT_FOUND, ...)
+if row.user_id != user_id:
+    raise OctopError(ErrorCode.FORBIDDEN, &quot;thread not owned by user&quot;)
+</code></pre>
+<p>这里省略号是教学摘录标记，不是可运行代码。第一关防止给 A 专家塞入 B 专家的线程，第二关防止同一共享专家下读取别人的私人线程。只验证 JWT 或只检查 agent_id 都不够。</p>
+<h2 id="session-key-是入口绑定-不是授权凭证">session_key 是入口绑定，不是授权凭证<a class="anchor" href="#session-key-是入口绑定-不是授权凭证" aria-label="链接到本节">#</a></h2>
+<p>Web 默认会话键可表示为：</p>
+<pre><code class="language-text">&lt;agent_id&gt;:dashboard:&lt;user_id&gt;:dm
+</code></pre>
+<p>CLI 与 IM 有各自的键规则。IM 会把平台会话及私聊/群聊语义纳入区分。thread_id 本身不负责编码来源，来源信息可以单独存入线程记录。</p>
+<p>为什么不直接拿 session_key 当 thread_id？因为同一个入口可以切换到新线程，旧线程仍需保留。绑定可变，对话身份稳定。ThreadRegistry 因而负责创建、绑定、归档等关系，而不只是提供一个随机 ID。</p>
+<p>任何由客户端带来的 session_key 都只能当作待验证的路由输入，不能因为字符串里包含某个用户编号就当作服务端已证明身份。本书并未穷尽审计所有调用者，这是一条需要持续测试的安全不变量。</p>
+<h2 id="用一组具体-id-走一次">用一组具体 ID 走一次<a class="anchor" href="#用一组具体-id-走一次" aria-label="链接到本节">#</a></h2>
+<p>教学例子里，林岚为 user 7，周越为 user 9，研究专家为 research。两人各自使用：</p>
+<pre><code class="language-text">research:dashboard:7:dm → thread-L
+research:dashboard:9:dm → thread-Z
+</code></pre>
+<p>专家共享以后，两条映射仍应独立。林岚新建会话时，自己的入口可改绑 thread-L2；thread-L 作为旧对话保留。周越复制 thread-L 的 ID 发起订阅，服务端应拒绝，而不是因为两人选中同一专家就放行。</p>
+<p>再加一个 IM 群聊，它是新的入口语义。要不要和 Web 共用对话，不应靠碰巧相同的字符串决定，需要明确的绑定规则和授权。</p>
+<h2 id="资源删除也必须沿标识追踪">资源删除也必须沿标识追踪<a class="anchor" href="#资源删除也必须沿标识追踪" aria-label="链接到本节">#</a></h2>
+<p>删除专家可能涉及线程、checkpoint、记忆、工作区和正在执行的调用。删除一条线程则不等于删除专家的全部长期记忆。manager.py 的线程清理与回收逻辑提示，这些动作已经不是简单的一条 DELETE。</p>
+<p>制定数据删除需求时，要列出每种数据归属。否则界面里删除了会话，用户可能以为历史、工具产物、派生记忆和备份都消失了，实际只移除了一个视图对象。</p>
+<details>
+<summary>如何把权限规则变成测试</summary>
+
+<p>准备同一所有者、共享用户、未授权用户和管理员四个主体。分别测试专家读取、配置写入、线程读取、WS 订阅与取消。共享用户“可聊天、不可改配置、不可读别人的 thread”必须是三条独立断言。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/common/agent.py"><code>src/octop/api/common/agent.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/api/routers/chat/turn.py"><code>src/octop/api/routers/chat/turn.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/gateway/threads.py"><code>src/octop/infra/gateway/threads.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/tests/integration/test_boundary_authz.py"><code>tests/integration/test_boundary_authz.py</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>周越没有专家所有权，但有分享访问权限。为什么允许他创建自己的对话，却不允许他改这个专家的模型？</p>
+<p><strong>答案提示：</strong> 运行能力的使用权与资源配置权分开。模型和工具改变会影响专家所有者及其他使用者；聊天则可通过独立线程控制范围。不能把“能访问资源”的布尔值复用成全部管理许可。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="04-agent-runtime.html"><small>上一章</small><strong>Agent 装配：配置如何变成能力</strong></a><a class="next" href="06-storage.html"><small>下一章</small><strong>存储与历史：不要寻找唯一数据库</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

@@ -1,0 +1,28 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>资料入库：先把文档读对，再谈检索 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="03-ingestion"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#解析验收不能只看字符数">解析验收不能只看字符数</a></li><li><a href="#文档-id-和片段-id-分开">文档 ID 和片段 ID 分开</a></li><li><a href="#csv-和-json-要保留字段语义">CSV 和 JSON 要保留字段语义</a></li><li><a href="#当前视图怎样发布">当前视图怎样发布</a></li><li><a href="#重新入库会影响什么">重新入库会影响什么</a></li><li><a href="#对应代码与资料">对应代码与资料</a></li></ol></details><article class="content"><h1 id="资料入库-先把文档读对-再谈检索">资料入库：先把文档读对，再谈检索</h1><p>回调规范里有一个表格，左列是事件类型，右列是确认方式。PDF 解析把所有左列读完，再拼上所有右列。生成的文字没有乱码、长度也正常，但事件和处理方式已经错位。此时 embedding、重排和提示词都可能把错误传得更稳定。</p>
+<h2 id="解析验收不能只看字符数">解析验收不能只看字符数</h2><p>选择代表性文档，逐项检查标题、段落顺序、表头、单位、脚注和跨页连接。对关键事实写人工校验项，比如“重复通知不重复发货”是否仍保留否定词。扫描件需要 OCR，复杂电子 PDF 也可能需要版面理解。</p>
+<p>验收解析时可以先不接生成器。否则模型碰巧凭常识回答正确，会掩盖解析器读错的事实。保存原文件定位，便于用户从回答回到原页面；原文更新后，旧页码和偏移也要绑定旧版本。</p>
+<p>上游的 Mistral OCR Notebook 是普通解析与结构感知方案的对照入口，README 标注了赞助。它展示一种可验证的路径，不是本书复现过的解析排行榜。</p>
+<h2 id="文档-id-和片段-id-分开">文档 ID 和片段 ID 分开</h2><p>同一份回调规范有 v1、v2 两个版本，<code>doc_id</code> 可以都叫 <code>callback</code>，版本字段不同。第一个片段分别叫 <code>callback-v1:0</code> 和 <code>callback-v2:0</code>。不能仅用正文 hash 代替文档身份，因为不同来源可能出现相同段落，却有不同权限和效力。</p>
+<p>入库时检查 ID 唯一，也检查同一文档版本下位置不重复。配套 <code>Retriever</code> 的初始化会拒绝重复身份，防止融合字典覆盖或邻域扩展取错块。</p>
+<pre tabindex="0"><code class="hljs"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;callback-v2:0&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;doc_id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;callback&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;version&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;v2&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;position&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">0</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;scope&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;public&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;active&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">true</span></span>
+<span class="hljs-punctuation">}</span></code></pre><p>正文与来源也是必填字段。空来源并不阻碍计算分数，却会让引用在验收时失去作用，因此在边界处就拒绝它。</p>
+<h2 id="csv-和-json-要保留字段语义">CSV 和 JSON 要保留字段语义</h2><p>把一行配置拼成“渠道：DEMO_PAY；回调方式：异步；币种：CNY”，比直接拼“DEMO_PAY 异步 CNY”更便于解释。日期也要写明角色，不能只有“2026-11-03”。嵌套 JSON 的子对象离开父对象后，应仍然能识别所属模块和记录。</p>
+<p>但“统计所有启用渠道数”不能靠 top-k 检索完成。这个问题需要在授权数据全集上筛选和计数。模型可以解释查询结果，检索器返回几行则不能证明全集只有几行。</p>
+<h2 id="当前视图怎样发布">当前视图怎样发布</h2><p>一个可行的生产推演是：先把 v2 原文、片段和索引写到新版本，做完整性检查，再切换活动指针，最后失效旧缓存。发布过程中失败，查询继续读 v1 的完整快照。若先停用 v1，v2 索引却只写了一半，就会出现无资料或部分资料。</p>
+<p>配套 JSONL 只是预先写好的静态快照，<code>active</code> 标记现行与废弃，不实现上述事务。历史时点查询需要有效区间与授权视图，不能简单将 <code>active</code> 过滤关掉。</p>
+<h2 id="重新入库会影响什么">重新入库会影响什么</h2><p>只改正文时，依赖它的 embedding、生成问题、摘要、图谱边和回答缓存都可能需要刷新。来源定位也可能变化。为派生数据保存父片段和配置版本，可以按依赖关系重建；没有这些记录，就只能猜哪些旧结果仍然有效。</p>
+<p>不同库之间的写入往往不是一个事务。先采用可重放任务和版本化发布，比假设“向量写成功就算全量成功”更容易恢复。</p>
+<h2 id="对应代码与资料">对应代码与资料</h2><ul>
+<li><a href="../../examples/documents.jsonl">documents.jsonl</a>：独立编写的教学快照</li>
+<li><a href="../../examples/mini_rag.py">mini_rag.py</a>：<code>Chunk.__post_init__</code>、<code>load_chunks</code>、重复身份检查</li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/simple_csv_rag.ipynb">上游 CSV 示例</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/json_rag.ipynb">上游 JSON 示例</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/document_parsing_with_mistral_ocr.ipynb">上游 OCR 对照</a></li>
+</ul>
+</article><nav class="pager" aria-label="篇章导航"><a href="02-architecture.html"><small>上一篇</small>技术方案：从需求推导一条可检查的链路</a><a href="04-chunking.html"><small>下一篇</small>文档切分：验签和幂等，为什么只找到一半</a></nav></main><script src="../assets/wiki.js"></script></body></html>

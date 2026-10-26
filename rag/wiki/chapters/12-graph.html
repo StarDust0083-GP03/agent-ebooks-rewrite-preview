@@ -1,0 +1,26 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>图谱检索：从模块一路找到负责人 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="12-graph"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#先做两步检索-还是先建图">先做两步检索，还是先建图</a></li><li><a href="#边需要方向-范围和来源">边需要方向、范围和来源</a></li><li><a href="#上游几条-graph-rag-路线并不相同">上游几条 Graph RAG 路线并不相同</a></li><li><a href="#读-lightrag-示例时看哪些边界">读 LightRAG 示例时看哪些边界</a></li><li><a href="#图谱的评估应检查证据路径">图谱的评估应检查证据路径</a></li><li><a href="#对应资料">对应资料</a></li></ol></details><article class="content"><h1 id="图谱检索-从模块一路找到负责人">图谱检索：从模块一路找到负责人</h1><p>“回调模块由谁评审？”第一份资料说回调模块由结算组维护，第二份资料说结算组技术负责人是陈禾。第二份没有出现“回调”，一次词面检索很容易只找到第一份。这里缺少的是跨材料连接。</p>
+<h2 id="先做两步检索-还是先建图">先做两步检索，还是先建图</h2><p>一个直接方案是先查模块归属，再用“结算组 技术负责人”查第二份文档。问题路线稳定、资料规模不大时，这条受控链就可能足够。它只增加一次明确查询，不要求长期维护图结构。</p>
+<p>建图则把常见连接提前保存：</p>
+<pre tabindex="0"><code class="hljs">回调模块 ──维护团队──→ 结算组 ──技术负责人──→ 陈禾
+   来源 owner-v1:0             来源 team-v1:0</code></pre><p>当大量问题反复沿相似关系访问，图能够提供更直接的入口。但抽取、消歧、更新和授权都成为额外工作，不能只根据“问题有两跳”就认定图数据库必不可少。</p>
+<h2 id="边需要方向-范围和来源">边需要方向、范围和来源</h2><p>“陈禾负责结算组”不等于“结算组负责陈禾”；“维护模块”不等于“批准退款”。图结构里要表达明确关系，并为每条边保存支持它的原文。回答找到姓名后，也不能把职责关系升级成某笔操作的授权。</p>
+<p>同名实体需要使用稳定业务标识消歧。把所有名称小写、去空格，可以减少格式差异，却不能分清两个同名团队。时间也会改变负责人关系，查询“现在找谁”和“事故当天找谁”需要不同视图。</p>
+<p>遍历必须在可见图上执行，并对返回原文再次核验权限。不能让用户通过节点计数、关系描述或摘要得知受限资料的存在。</p>
+<h2 id="上游几条-graph-rag-路线并不相同">上游几条 Graph RAG 路线并不相同</h2><p>通用 Graph RAG 示例展示实体关系与文本检索结合。Milvus 版本以片段与关系三元组分集合检索，再做关系重排。Local Graph RAG 使用本地模型和 NetworkX，并强调句级归因。</p>
+<p>Microsoft GraphRAG 更关注语料层面的全局问题，通过实体图和社区摘要生成局部回答再汇总。它不等于“查一条两跳关系”的别名。它的摘要与社区组织，需要按照全局主题问题来验收。</p>
+<p>LightRAG 使用低层具体实体和高层主题关系的双层检索。上游 Notebook 用 NetworkX 图与实体、关系两个 FAISS 索引演示这一思想。</p>
+<h2 id="读-lightrag-示例时看哪些边界">读 LightRAG 示例时看哪些边界</h2><p>固定提交使用无向图，实体键主要由名称去空格并小写得到，片段数量也做了教学截取。它便于观察实体与关系如何关联回原文，不能据此认定方向、同名消歧、组织权限和所有增量更新问题都已解决。</p>
+<p>关系抽取失败时，原文可能仍在，图里却没有边。因此图召回也应保留必要的文本回退路径，并记录失败抽取，而不是把“没有边”解释为“原文明确没有关系”。</p>
+<h2 id="图谱的评估应检查证据路径">图谱的评估应检查证据路径</h2><p>对负责人问题，gold 至少包含模块归属和团队职责。只答对姓名可能来自模型常识或碰巧猜中，不能说明两跳路径正确。保存起点实体、经过的边、最终原文和回答引用，可以检查是否沿错误同名团队走到了正确人名。</p>
+<p>还要测试更换负责人后的旧路径、无权限中间节点和相反方向关系。边数、节点数和图可视化的复杂程度都不是答案质量指标。</p>
+<h2 id="对应资料">对应资料</h2><p>本书离线程序没有实现图抽取和遍历；负责人题保留为可观察的挑战题。</p>
+<ul>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/graph_rag.ipynb">通用 Graph RAG</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/graphrag_with_milvus_vectordb.ipynb">Milvus Graph RAG</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/graph_rag_local_attribution.ipynb">本地句级归因</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/Microsoft_GraphRag.ipynb">Microsoft GraphRAG</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/light_rag.ipynb">LightRAG</a></li>
+<li><a href="https://arxiv.org/abs/2404.16130">GraphRAG 论文</a></li>
+<li><a href="https://arxiv.org/abs/2410.05779">LightRAG 论文</a></li>
+</ul>
+</article><nav class="pager" aria-label="篇章导航"><a href="11-hierarchy-memory.html"><small>上一篇</small>层次索引与记忆：问题开始面向整份资料</a><a href="13-multimodal-agent.html"><small>下一篇</small>多模态与 Agent：处理更复杂的资料和任务</a></nav></main><script src="../assets/wiki.js"></script></body></html>

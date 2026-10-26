@@ -1,0 +1,156 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>附录 B：来源、术语与事实边界 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="appendix-sources"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#上游源码快照">上游源码快照</a></li><li><a href="#论文阅读范围">论文阅读范围</a></li><li><a href="#本地-sam-系列的参考位置">本地 SAM 系列的参考位置</a></li><li><a href="#常用术语">常用术语</a></li><li><a href="#如何理解书中的实验">如何理解书中的实验</a></li></ol></details><article class="content"><h1 id="附录-b-来源-术语与事实边界">附录 B：来源、术语与事实边界</h1><h2 id="上游源码快照">上游源码快照</h2><ul>
+<li>仓库：<a href="https://github.com/NirDiamant/RAG_Techniques">NirDiamant/RAG_Techniques</a></li>
+<li>提交：<code>8e9febb8b974daaed2d4f3ebf370c7bf877858ac</code></li>
+<li>核对日期：2026-10-27</li>
+<li>许可：<a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/LICENSE">Custom License Agreement</a>，限制非商业使用，要求署名；商业使用受许可材料需作者事先书面授权。</li>
+</ul>
+<p>本书保留引用与源码入口，不分发整个上游源码、Notebook 输出、图片和下载全文，不将第三方材料重新授权。若准备商业发布或采用第三方代码，请另行核对授权，本书不构成法律意见。</p>
+<p>静态逐 cell 核对的技术 Notebook 为：Simple RAG、Choose Chunk Size、Fusion Retrieval、Reranking、Contextual Chunk Headers、HyPE、Context Enrichment Window、Self-RAG、CRAG、LightRAG、MemoRAG。还核对了 README、LICENSE 与公共 helper_functions.py。其他案例用于路径导航及概念参考，未逐一执行或完整审计。</p>
+<h2 id="论文阅读范围">论文阅读范围</h2><p>下列来源直接核对了 arXiv 标题和摘要。这里没有声称完成全文研读，也不引用实验数值。涉及训练方式、聚类算法与推理细节，需进一步阅读原文并核对代码版本。</p>
+<table>
+<thead>
+<tr>
+<th>主题</th>
+<th>原始论文</th>
+<th>本书使用范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>RAG</td>
+<td><a href="https://arxiv.org/abs/2005.11401">Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks</a></td>
+<td>参数知识与外部检索组合的定位</td>
+</tr>
+<tr>
+<td>HyDE</td>
+<td><a href="https://arxiv.org/abs/2212.10496">Precise Zero-Shot Dense Retrieval without Relevance Labels</a></td>
+<td>假设文档引导真实资料检索</td>
+</tr>
+<tr>
+<td>Self-RAG</td>
+<td><a href="https://arxiv.org/abs/2310.11511">Learning to Retrieve, Generate, and Critique through Self-Reflection</a></td>
+<td>按需检索与反思 token，区别于提示演示</td>
+</tr>
+<tr>
+<td>CRAG</td>
+<td><a href="https://arxiv.org/abs/2401.15884">Corrective Retrieval Augmented Generation</a></td>
+<td>检索质量评价与纠正路线</td>
+</tr>
+<tr>
+<td>RAPTOR</td>
+<td><a href="https://arxiv.org/abs/2401.18059">Recursive Abstractive Processing for Tree-Organized Retrieval</a></td>
+<td>递归表示、聚类与摘要树</td>
+</tr>
+<tr>
+<td>GraphRAG</td>
+<td><a href="https://arxiv.org/abs/2404.16130">From Local to Global</a></td>
+<td>实体图、社区摘要与全局问题</td>
+</tr>
+<tr>
+<td>LightRAG</td>
+<td><a href="https://arxiv.org/abs/2410.05779">Simple and Fast Retrieval-Augmented Generation</a></td>
+<td>低层与高层双层检索</td>
+</tr>
+<tr>
+<td>MemoRAG</td>
+<td><a href="https://arxiv.org/abs/2409.05591">Global Memory-Enhanced Retrieval Augmentation</a></td>
+<td>全局记忆产生检索线索</td>
+</tr>
+</tbody></table>
+<p>初次阅读可先选 RAG 和 HyDE，理解外部证据与查询表示；需要纠错时读 CRAG；面向长资料或全局主题时再读 RAPTOR 与 GraphRAG。它们关注的问题不同，不构成同一协议下的效果排名。</p>
+<h2 id="本地-sam-系列的参考位置">本地 SAM 系列的参考位置</h2><p>阅读了本地归档的支付开篇与完结篇、技术方案代表段落、商品读接口和 DDD 聚合根文章。参考它们的业务起点、需求到架构映射、方案比较、实现与代码定位方式，没有将 SAM 的生产经历写成本书经历。</p>
+<p>原始入口如下，未在本轮重新抓取网页：</p>
+<ul>
+<li><a href="https://articles.zsxq.com/id_bzupb5c15gai.html">支付系统开篇</a></li>
+<li><a href="https://articles.zsxq.com/id_v0zrzvjq8p7z.html">支付技术方案</a></li>
+<li><a href="https://articles.zsxq.com/id_257wk60lddkd.html">支付完结篇</a></li>
+<li><a href="https://articles.zsxq.com/id_rtsxkjlgg40q.html">商品读接口</a></li>
+<li><a href="https://articles.zsxq.com/id_2qxa8ki39zcj.html">从配货单表解释聚合根</a></li>
+</ul>
+<p>本书阅读器的基础样式参考用户已有的 <a href="https://github.com/StarDust0083-GP03/agent-memory-from-scratch">Agent Memory from Scratch</a>，工程目录也参考了 <a href="https://github.com/StarDust0083-GP03/langchain-langgraph-from-scratch">LangChain × LangGraph from Scratch</a>。写作组织以本轮指定的 SAM 系列为主。</p>
+<h2 id="常用术语">常用术语</h2><table>
+<thead>
+<tr>
+<th>术语</th>
+<th>本书含义</th>
+<th>容易混淆的对象</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Chunk</td>
+<td>带来源与身份的检索片段</td>
+<td>文档整体、检索名次</td>
+</tr>
+<tr>
+<td>Embedding</td>
+<td>编码模型产生的向量表示</td>
+<td>本书的词频向量</td>
+</tr>
+<tr>
+<td>BM25</td>
+<td>基于词项、词频与长度的相关性评分</td>
+<td>精确字符串搜索</td>
+</tr>
+<tr>
+<td>Dense Retrieval</td>
+<td>使用稠密表示进行召回</td>
+<td>所有形式的“向量”计算</td>
+</tr>
+<tr>
+<td>RRF</td>
+<td>按 ID 累计多个排名的倒数贡献</td>
+<td>分数归一化加权</td>
+</tr>
+<tr>
+<td>Reranking</td>
+<td>对有限候选重新评分排序</td>
+<td>从全库补召回</td>
+</tr>
+<tr>
+<td>Grounding</td>
+<td>结论与实际证据建立支持关系</td>
+<td>回答听起来正确</td>
+</tr>
+<tr>
+<td>Citation</td>
+<td>指向可核对材料的引用</td>
+<td>支持性已经通过验证</td>
+</tr>
+<tr>
+<td>HyDE</td>
+<td>查询时生成假设文档供检索</td>
+<td>把生成内容当真实证据</td>
+</tr>
+<tr>
+<td>HyPE</td>
+<td>索引时生成问题代理</td>
+<td>查询时生成答案</td>
+</tr>
+<tr>
+<td>Graph RAG</td>
+<td>用实体关系帮助组织与读取</td>
+<td>一种统一的标准实现</td>
+</tr>
+<tr>
+<td>Agentic RAG</td>
+<td>模型参与多步工具和检索选择</td>
+<td>任意固定问答链</td>
+</tr>
+<tr>
+<td>ACL</td>
+<td>数据访问控制规则</td>
+<td>相关性阈值</td>
+</tr>
+<tr>
+<td>Recall</td>
+<td>必要证据中被找到的比例</td>
+<td>最终回答正确率</td>
+</tr>
+<tr>
+<td>MRR</td>
+<td>首个相关结果名次的倒数均值</td>
+<td>多条必要证据完整性</td>
+</tr>
+</tbody></table>
+<h2 id="如何理解书中的实验">如何理解书中的实验</h2><p>教学资料、题集和代码是本书独立编写的虚构实验。Python 程序只做检索和证据组装，不会调用语言模型。手工示范回答会明确标注；代码输出与教学推演不混写为第三方服务实测。</p>
+<p>本地小题集只证明当前配置在这些输入上的行为。没有做远程模型评测、OCR 对照复现、图谱效果验证、吞吐压测或生产安全认证。构建与 EPUB 校验属于交付结构检查，不等于内容质量和模型效果验证。</p>
+</article><nav class="pager" aria-label="篇章导航"><a href="appendix-map.html"><small>上一篇</small>附录 A：上游 Notebook 阅读地图</a><a href="appendix-code.html"><small>下一篇</small>附录 C：配套实现与教学资料</a></nav></main><script src="../assets/wiki.js"></script></body></html>

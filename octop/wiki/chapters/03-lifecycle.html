@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="description" content="参考本地 SAM 系列讲解方法，从需求、数据到请求链路解剖 Octop 架构"><meta name="author" content="项目架构学习笔记">
+<title>启动与退出：谁把系统装起来 · Octop 架构解剖</title>
+<link rel="stylesheet" href="../assets/reader.css">
+</head><body data-chapter="true">
+<div class="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">跳到正文</a>
+<header class="topbar">
+  <a class="brand" href="../index.html"><span class="brand-mark">O</span><span>Octop 架构解剖</span></a>
+  <nav class="tools" aria-label="阅读工具">
+    <a class="tool-button" href="../search.html" aria-label="搜索">搜索</a>
+    <button class="tool-button" data-font-down aria-label="减小字号">A−</button>
+    <button class="tool-button" data-font-up aria-label="增大字号">A+</button>
+    <button class="tool-button" data-theme><span class="theme-label">深色</span></button>
+    <button class="tool-button" data-menu-open aria-label="打开目录">目录</button>
+  </nav>
+</header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 03</div><div class="rail-title">启动与退出：谁把系统装起来</div><ol><li><a href="#两个装配入口-各有职责">两个装配入口，各有职责</a></li><li><a href="#从文件到可接收请求的系统">从文件到可接收请求的系统</a></li><li><a href="#配置不是读一次就结束">配置不是读一次就结束</a></li><li><a href="#启动失败要区分层次">启动失败要区分层次</a></li><li><a href="#退出不是直接杀进程">退出不是直接杀进程</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 03 章</div><h1>启动与退出：谁把系统装起来</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 8 分钟</div></header><div class="prose"><h2 id="两个装配入口-各有职责">两个装配入口，各有职责<a class="anchor" href="#两个装配入口-各有职责" aria-label="链接到本节">#</a></h2>
+<p>启动命令最终进入 launch.py 的 run_foreground。这里同时知道 OctopServer 与 FastAPI，并把它们接给 uvicorn。业务组件的装配放在 infra/server.py，HTTP 应用组装放在 api/app.py。</p>
+<p>这样的边界防止业务核心为了启动渠道而反向依赖 HTTP 路由，也让嵌入式 CLI 可以使用 OctopServer 而不必总启动 Web 服务。所谓 composition root，就是集中决定“创建谁、把谁传给谁”的位置，不是一个新的业务服务。</p>
+<h2 id="从文件到可接收请求的系统">从文件到可接收请求的系统<a class="anchor" href="#从文件到可接收请求的系统" aria-label="链接到本节">#</a></h2>
+<p>常规路径可以压缩成下面的依赖顺序：</p>
+<pre><code class="language-text">PathLayout 与配置
+  → 专家 / 子 Agent 目录，插件播种与加载
+  → 打开控制面数据库，执行迁移
+  → SharedServices 与 JWT 所需材料
+  → AgentManager、历史/轨迹服务、Gateway、Cron 等
+  → AppRuntime
+  → FastAPI 应用与监听器
+</code></pre>
+<p>这是一张依赖地图，不是源码所有语句的逐行列表。启动还包含日志、资源限制、浏览器配置、知识库任务恢复、Bridge 自动重连等支线。</p>
+<p>源码提供一个容易漏掉的分支：首次安装时，数据库后端尚未由设置向导选定，should_defer_control_plane_db 可以让服务暂缓打开控制面。此时“进程活着”不等于“所有业务依赖已就绪”。bind_control_plane 在用户完成选择后再创建仓储和运行时。</p>
+<p>林岚第一次打开页面看见向导，并不意味着服务启动失败。它进入了一个有意设计的未绑定状态。</p>
+<h2 id="配置不是读一次就结束">配置不是读一次就结束<a class="anchor" href="#配置不是读一次就结束" aria-label="链接到本节">#</a></h2>
+<p>配置来源包括文件与环境变量，Agent 和 Provider 的有效配置又来自控制面。设置向导换库还有空库条件下的重绑定路径。运行时组件因此提供 replace_* 或类似的更新接口，而不是让数据库模块随意修改其他对象的私有字段。</p>
+<p>这个安排的重点不是支持任意热切换，而是限定什么时候可以切、切完哪些引用必须一致。ADR 002 把已有用户的运行环境与空库 setup 区分开；分段历史归档又会加上额外限制。不能把管理界面上有个数据库选项理解成随时在线迁移所有状态。</p>
+<h2 id="启动失败要区分层次">启动失败要区分层次<a class="anchor" href="#启动失败要区分层次" aria-label="链接到本节">#</a></h2>
+<p>模型未配置、某个 Agent 的远程后端失联、数据库迁移失败，影响范围不同。数据库连接与迁移是许多业务的基础；单个 Agent 的构建则可以有自己的失败状态和超时约束。AgentManager 中可以找到启动超时与有界重载相关代码。</p>
+<p>对工作室来说，研究专家暂时不可用不应被误报成全部历史丢失。故障页面和日志至少要分清：宿主未就绪、用户未初始化、专家未运行、当次模型请求失败。</p>
+<p>本书没有运行这些失败实验，这里给出的是根据装配依赖推导的排障顺序。</p>
+<h2 id="退出不是直接杀进程">退出不是直接杀进程<a class="anchor" href="#退出不是直接杀进程" aria-label="链接到本节">#</a></h2>
+<p>server.stop 会依次处理主动关怀调度、cron、gateway、Agent 注册表与用户侧资源，并关闭历史存储与数据库。退出过程中还涉及连接器会话和后端浏览会话的清理。</p>
+<p>为什么先停调度再关 Agent？因为调度器继续派活时，运行资源可能已开始销毁。正确的退出过程需要停止接纳、处理或终止在途工作、刷新持久化、释放连接。源码的关闭序列提供了基础，但不要由此推定它对所有外部副作用提供了精确一次保证。</p>
+<details>
+<summary>在纸上画启动状态机</summary>
+
+<p>可用未启动、已启动但数据库未绑定、数据库已绑定、业务运行中、关闭中、已关闭六个状态分析。它是教学抽象，不是源码枚举。为每条边标注触发者与失败时仍有效的资源，能很快发现“只判断进程是否存活”的健康检查遗漏。</p>
+</details>
+
+<h2 id="源码入口">源码入口<a class="anchor" href="#源码入口" aria-label="链接到本节">#</a></h2>
+<ul>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/launch.py"><code>src/octop/launch.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/server.py"><code>src/octop/infra/server.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/db/factory.py"><code>src/octop/infra/db/factory.py</code></a></li>
+<li><a href="https://github.com/TencentCloud/Octop/blob/890111b7879665840414ca28ab168b05b0db0921/src/octop/infra/db/rebind.py"><code>src/octop/infra/db/rebind.py</code></a></li>
+</ul>
+<h2 id="动手检查">动手检查<a class="anchor" href="#动手检查" aria-label="链接到本节">#</a></h2>
+<p>首次设置选择 PostgreSQL 时连接失败，能否先创建管理员，再把用户表搬过去？</p>
+<p><strong>答案提示：</strong> 不应跳过目标数据库成功绑定这个前提。否则管理员写到哪一个控制面、后续 JWT 与仓储读哪一个控制面都会变得含糊。应按向导约束解决连接，再完成初始化，而不是临时发明迁移步骤。</p>
+</div><nav class="chapter-nav" aria-label="章节导航"><a href="02-architecture.html"><small>上一章</small><strong>总体架构：单进程，不是单模块</strong></a><a class="next" href="04-agent-runtime.html"><small>下一章</small><strong>Agent 装配：配置如何变成能力</strong></a></nav></article></main><dialog class="menu-panel" data-menu-panel>
+  <div class="menu-head"><span>全书目录</span><button class="tool-button" data-menu-close>关闭</button></div>
+  <nav class="menu-list"><a href="../chapters/00-preface.html"><span>00</span>前言：沿一次任务读懂平台</a><a href="../chapters/01-requirements.html"><span>01</span>需求分析：先确定系统要保住什么</a><a href="../chapters/02-architecture.html"><span>02</span>总体架构：单进程，不是单模块</a><a href="../chapters/03-lifecycle.html"><span>03</span>启动与退出：谁把系统装起来</a><a href="../chapters/04-agent-runtime.html"><span>04</span>Agent 装配：配置如何变成能力</a><a href="../chapters/05-identity.html"><span>05</span>身份与会话：四种 ID，四条边界</a><a href="../chapters/06-storage.html"><span>06</span>存储与历史：不要寻找唯一数据库</a><a href="../chapters/07-workspace.html"><span>07</span>工作区后端：远程文件不等于远程执行</a><a href="../chapters/08-turn-path.html"><span>08</span>一次对话：从 WebSocket 到模型再回来</a><a href="../chapters/09-memory-rag.html"><span>09</span>记忆与知识库：两条不同的检索路径</a><a href="../chapters/10-extensions.html"><span>10</span>工具与扩展：Skill、Plugin、Connector 和 MCP</a><a href="../chapters/11-teams.html"><span>11</span>多 Agent：房间共享，状态分离</a><a href="../chapters/12-security.html"><span>12</span>安全边界：能聊天不等于能管理</a><a href="../chapters/13-dashboard.html"><span>13</span>前端架构：流式对话是一台状态机</a><a href="../chapters/14-interop.html"><span>14</span>跨端协作：ACP 与 Bridge 各管什么</a><a href="../chapters/15-operations.html"><span>15</span>部署与验证：把恢复当成一项功能</a><a href="../chapters/16-tradeoffs.html"><span>16</span>架构评价：何时保留单体，何时拆分</a><a href="../chapters/17-mini-host.html"><span>17</span>代码实战：用最小宿主验证四条边界</a><a href="../chapters/appendix-sources.html"><span>A</span>附录：源码索引、术语与核验路线</a></nav>
+</dialog>
+<footer class="site-footer">独立架构研究，非官方文档 · Octop 1.0.3b1 · 890111b78796 · 2026-10-27</footer>
+<script src="../assets/reader.js"></script>
+</body></html>

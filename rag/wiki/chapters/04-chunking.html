@@ -1,0 +1,27 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="参考 SAM 工程专栏结构，以 RAG_Techniques 为技术地图的中文学习书稿"><title>文档切分：验签和幂等，为什么只找到一半 · RAG 工程实战</title><link rel="stylesheet" href="../assets/wiki.css"></head><body><a class="skip" href="#main">跳到正文</a><header class="topbar"><a class="brand" href="../index.html">RAG 工程实战</a><span class="spacer"></span><a class="control" href="../search.html">搜索</a><button class="control" data-size="-1" aria-label="减小字号">A−</button><button class="control" data-size="1" aria-label="增大字号">A＋</button></header><main id="main" class="book" data-chapter="04-chunking"><details class="toc"><summary>本篇目录</summary><ol><li><a href="#块是召回单位-不必是阅读单位">块是召回单位，不必是阅读单位</a></li><li><a href="#固定长度切分怎样工作">固定长度切分怎样工作</a></li><li><a href="#语义切分和命题切分解决不同问题">语义切分和命题切分解决不同问题</a></li><li><a href="#标题增强应该先试结构信息">标题增强应该先试结构信息</a></li><li><a href="#这项设计怎么验收">这项设计怎么验收</a></li><li><a href="#对应代码与资料">对应代码与资料</a></li></ol></details><article class="content"><h1 id="文档切分-验签和幂等-为什么只找到一半">文档切分：验签和幂等，为什么只找到一半</h1><p>回调规范第一段讲验签，第二段讲幂等。用户把两个问题一起问了，检索器却只命中第一段。把整份文档当一个块可以暂时找齐材料，但文档有几十页时，每次都送进去又会浪费上下文。切分的设计从这个矛盾展开。</p>
+<h2 id="块是召回单位-不必是阅读单位">块是召回单位，不必是阅读单位</h2><p>小块适合精确定位，大块容易保留完整语境。可以用小块搜索，命中后补上同一章节中的相邻段落。这样不用要求一个表示同时概括验签、退款和对账，也不用让回答模型只看半条规则。</p>
+<p>但邻域补全不是无限加段落。文档边界、版本、权限和长度限制都要保留。两个相邻段落若属于不同权限范围，位置相近也不意味着能一起交付。</p>
+<h2 id="固定长度切分怎样工作">固定长度切分怎样工作</h2><p>最小实现提供 <code>split_text(text, size=400, overlap=80)</code>。步长是 320，第二块从第 320 个字符开始。重叠使边界附近的文字在两个块中出现，能降低句子被截断后完全丢失的概率。</p>
+<pre tabindex="0"><code class="hljs"><span class="hljs-keyword">def</span> <span class="hljs-title function_">split_text</span>(<span class="hljs-params">text, size=<span class="hljs-number">400</span>, overlap=<span class="hljs-number">80</span></span>):
+    <span class="hljs-keyword">if</span> <span class="hljs-keyword">not</span> <span class="hljs-number">0</span> &lt;= overlap &lt; size:
+        <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;require 0 &lt;= overlap &lt; size&quot;</span>)
+    <span class="hljs-keyword">return</span> [text[i:i + size]
+            <span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(<span class="hljs-number">0</span>, <span class="hljs-built_in">len</span>(text), size - overlap)]</code></pre><p>完整代码还验证参数是整数。overlap 等于 size 时步长为零，这不是质量问题，而是必须在入口拒绝的非法配置。</p>
+<p>示例函数按字符计数，不是 Token。它也可能生成一个很短的尾块；上线时可按段落结构合并尾块。主线 JSONL 已按完整教学段落编写，并未自动调用这个函数切分，读者应单独修改配置验证边界。</p>
+<h2 id="语义切分和命题切分解决不同问题">语义切分和命题切分解决不同问题</h2><p>语义切分观察相邻句子表示的变化，尽量在主题转换处划分。它能减少不同主题被混在一起，但需要句子切分、embedding 和阈值，也需要块长上下限。编号规则和表格不能只靠句号处理。</p>
+<p>命题切分则把原文提取成自包含事实。“重复回调不重复发货，退款事件另行处理”不能被简化成“所有事件都不重复处理”。模型提取时要保留主语、条件和否定，命题要指向原文，不能成为无法核对的新事实。</p>
+<p>它们可能组合使用，但开销也会叠加。先确认失败确实来自主题混杂或事实表达不独立，再考虑引入，不需要为了“高级”一次装全。</p>
+<h2 id="标题增强应该先试结构信息">标题增强应该先试结构信息</h2><p>一个块只有“核对成功后更新状态”，脱离章节以后看不出在讲回调。可以给检索表示加上“支付规范 v2 / 回调处理”这样的标题。若原文已有可靠标题，直接使用比先让模型猜标题更稳妥。</p>
+<p>要区分检索文本与引用正文。标题可以帮助找到块，但如果标题由模型生成，不能将它当作原文已有的业务事实。生产数据可以保存 <code>retrieval_text</code> 与 <code>source_text</code> 两个字段及各自来源。</p>
+<p>上游 Contextual Chunk Headers 的可见示例比较了加标题前后的重排得分。这个对照能解释标题作用，不足以单独证明整个知识库的召回率提高。</p>
+<h2 id="这项设计怎么验收">这项设计怎么验收</h2><p>固定解析输出和题目，记录块长、重叠、必要证据召回、最终证据字符数。若改变块长时也改变重叠，就按组合配置比较，不声称只测了块长的影响。</p>
+<p>上游 Choose Chunk Size 正是同时调整 chunk size 与 overlap 的示例。它提供实验入口，不给我们的中文支付资料提供通用最优数字。</p>
+<h2 id="对应代码与资料">对应代码与资料</h2><ul>
+<li><a href="../../examples/mini_rag.py">mini_rag.py</a>：<code>split_text</code>、<code>expand</code></li>
+<li><a href="../../examples/test_mini_rag.py">参数与邻域测试</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/choose_chunk_size.ipynb">Choose Chunk Size</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/semantic_chunking.ipynb">Semantic Chunking</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/proposition_chunking.ipynb">Proposition Chunking</a></li>
+<li><a href="https://github.com/NirDiamant/RAG_Techniques/blob/8e9febb8b974daaed2d4f3ebf370c7bf877858ac/all_rag_techniques/contextual_chunk_headers.ipynb">Contextual Chunk Headers</a></li>
+</ul>
+</article><nav class="pager" aria-label="篇章导航"><a href="03-ingestion.html"><small>上一篇</small>资料入库：先把文档读对，再谈检索</a><a href="05-baseline.html"><small>下一篇</small>基础检索：先交付一条能复现的链路</a></nav></main><script src="../assets/wiki.js"></script></body></html>
