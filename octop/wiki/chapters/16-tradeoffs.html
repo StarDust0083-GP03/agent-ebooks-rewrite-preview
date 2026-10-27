@@ -18,7 +18,7 @@
   </nav>
 </header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 16</div><div class="rail-title">架构评价：何时保留单体，何时拆分</div><ol><li><a href="#回到开篇的任务">回到开篇的任务</a></li><li><a href="#最值得借鉴的四个选择">最值得借鉴的四个选择</a></li><li><a href="#当前复杂度聚集在哪里">当前复杂度聚集在哪里</a></li><li><a href="#治理顺序比拆分名单重要">治理顺序比拆分名单重要</a></li><li><a href="#什么时候才值得进程外队列">什么时候才值得进程外队列</a></li><li><a href="#从本项目迁移到自己的系统">从本项目迁移到自己的系统</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 16 章</div><h1>架构评价：何时保留单体，何时拆分</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 8 分钟</div></header><div class="prose"><h2 id="回到开篇的任务">回到开篇的任务<a class="anchor" href="#回到开篇的任务" aria-label="链接到本节">#</a></h2>
 <p>现在可以沿完整链路复述林岚的请求：认证用户选择一位可访问的专家，当前入口绑定自己的线程；附件成为工作区引用，知识检索在可见集合里找证据；宿主组装模型与工具能力，运行库执行；高风险动作进入审批；成员专家各自工作后向房间回传；流式帧、历史、checkpoint 与长期记忆按不同职责保存。</p>
-<p>这条链路的价值不是让所有组件看起来一致，而是让不同职责的交接可核对。Octop 的架构重点正是这些交接，而不是“套了一个模型 SDK”。</p>
+<p>沿着这条链路，可以逐处核对不同职责的交接：身份有没有传对，状态有没有保存，审批有没有挡住外部动作。这些交接构成了模型 SDK 之外的宿主工作。</p>
 <h2 id="最值得借鉴的四个选择">最值得借鉴的四个选择<a class="anchor" href="#最值得借鉴的四个选择" aria-label="链接到本节">#</a></h2>
 <p>第一，围绕自托管约束保留单进程核心。部署简单是面向目标用户的产品价值，不是必须被微服务纠正的技术落后。</p>
 <p>第二，让多入口共用运行时能力。Web、CLI、IM、cron 尽可能回到共同消息与处理边界，减少各自维护一套提示、历史和审批逻辑的风险。</p>

@@ -170,7 +170,9 @@ addEventListener('afterprint', () => {
   if (bookNav) {
     const wrapper = document.createElement('details');
     wrapper.className = 'reader-book-toc';
-    wrapper.open = matchMedia('(min-width:1001px)').matches;
+    const wide = matchMedia('(min-width:1001px)');
+    wrapper.open = wide.matches;
+    wide.addEventListener('change', event => { wrapper.open = event.matches; });
     const summary = document.createElement('summary'); summary.textContent = '全书目录';
     bookNav.before(wrapper); wrapper.append(summary, bookNav);
   }
@@ -213,6 +215,7 @@ addEventListener('afterprint', () => {
     const copy = oldButton.cloneNode(true);
     oldButton.replaceWith(copy);
     copy.setAttribute('aria-label', '复制这段代码');
+    copy.setAttribute('aria-live', 'polite');
     copy.addEventListener('click', async () => {
       const code = copy.closest('pre')?.querySelector('code');
       if (!code) return;
@@ -227,6 +230,16 @@ addEventListener('afterprint', () => {
       }
       setTimeout(() => { copy.textContent = '复制'; }, 1600);
     });
+  });
+  // Print folded examples too, then restore the reader's disclosure state.
+  let printDetails = [];
+  addEventListener('beforeprint', () => {
+    printDetails = [...new Set([...printDetails, ...document.querySelectorAll('main details:not([open])')])];
+    printDetails.forEach(details => { details.open = true; });
+  });
+  addEventListener('afterprint', () => {
+    printDetails.forEach(details => { details.open = false; });
+    printDetails = [];
   });
   const links = [...document.querySelectorAll('.chapter-rail a[href^="#"],.reader-mobile-toc a[href^="#"],nav.toc>a[href^="#"]')];
   const headings = [...new Set(links.map(link => document.getElementById(decodeURIComponent(link.hash.slice(1)))).filter(Boolean))];

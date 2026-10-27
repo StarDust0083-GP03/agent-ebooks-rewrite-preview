@@ -6,7 +6,7 @@
     <span class="hljs-keyword">if</span> <span class="hljs-keyword">not</span> <span class="hljs-number">0</span> &lt;= overlap &lt; size:
         <span class="hljs-keyword">raise</span> ValueError(<span class="hljs-string">&quot;require 0 &lt;= overlap &lt; size&quot;</span>)
     <span class="hljs-keyword">return</span> [text[i:i + size]
-            <span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(<span class="hljs-number">0</span>, <span class="hljs-built_in">len</span>(text), size - overlap)]</code></pre><p>完整代码还验证参数是整数。overlap 等于 size 时步长为零，这不是质量问题，而是必须在入口拒绝的非法配置。</p>
+            <span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(<span class="hljs-number">0</span>, <span class="hljs-built_in">len</span>(text), size - overlap)]</code></pre><p>完整代码还检查参数是否为整数。overlap 等于 size 时步长为零，入口应拒绝这类配置，否则循环无法前进。</p>
 <p>示例函数按字符计数，不是 Token。它也可能生成一个很短的尾块；上线时可按段落结构合并尾块。主线 JSONL 已按完整教学段落编写，并未自动调用这个函数切分，读者应单独修改配置验证边界。</p>
 <h2 id="语义切分和命题切分解决不同问题">语义切分和命题切分解决不同问题</h2><p>语义切分观察相邻句子表示的变化，尽量在主题转换处划分。它能减少不同主题被混在一起，但需要句子切分、embedding 和阈值，也需要块长上下限。编号规则和表格不能只靠句号处理。</p>
 <p>命题切分则把原文提取成自包含事实。“重复回调不重复发货，退款事件另行处理”不能被简化成“所有事件都不重复处理”。模型提取时要保留主语、条件和否定，命题要指向原文，不能成为无法核对的新事实。</p>

@@ -18,7 +18,7 @@
   </nav>
 </header><main id="main" class="reader-layout"><aside class="chapter-rail"><div class="rail-label">Chapter 13</div><div class="rail-title">前端架构：流式对话是一台状态机</div><ol><li><a href="#页面不是一份-messages-数组">页面不是一份 messages 数组</a></li><li><a href="#为什么-chatstore-放在组件之外">为什么 chatStore 放在组件之外</a></li><li><a href="#消息属于线程-也属于说话人">消息属于线程，也属于说话人</a></li><li><a href="#四个恢复判断各有用途">四个恢复判断各有用途</a></li><li><a href="#历史回填会与实时增量竞争">历史回填会与实时增量竞争</a></li><li><a href="#测试要抓事件顺序">测试要抓事件顺序</a></li><li><a href="#源码入口">源码入口</a></li><li><a href="#动手检查">动手检查</a></li></ol></aside><article class="chapter"><header class="chapter-head"><div class="chapter-number">第 13 章</div><h1>前端架构：流式对话是一台状态机</h1><div class="chapter-meta">源码快照 2026-10-27 · 约 10 分钟</div></header><div class="prose"><h2 id="页面不是一份-messages-数组">页面不是一份 messages 数组<a class="anchor" href="#页面不是一份-messages-数组" aria-label="链接到本节">#</a></h2>
 <p>浏览器要同时表达正文增量、思考、工具调用、工具结果、附件、配额、审批暂停、错误、取消和多人说话。简单“收到 token 就拼字符串，收到 done 就解锁”无法覆盖这些状态。</p>
-<p>Dashboard 使用 React、TypeScript、Vite、Ant Design 等组件。理解聊天架构的关键不是组件树有多少层，而是流状态由谁持有、消息怎样归属、历史如何与实时数据合并。</p>
+<p>Dashboard 使用 React、TypeScript、Vite、Ant Design 等组件。读聊天架构时，可以沿着三个问题追踪：谁持有流状态，消息属于哪个会话，历史怎样与实时数据合并。</p>
 <h2 id="为什么-chatstore-放在组件之外">为什么 chatStore 放在组件之外<a class="anchor" href="#为什么-chatstore-放在组件之外" aria-label="链接到本节">#</a></h2>
 <p>chatStore.ts 文件开头说明：WebSocket 与累计消息置于模块级 store，在 React 组件卸载、重挂载后仍存在；组件通过快照订阅更新。</p>
 <p>这解决一个具体问题：林岚切到设置页，聊天组件卸载，不应让在途任务的客户端状态立即丢失。回到聊天时可接上最新快照。</p>
@@ -36,7 +36,7 @@
 <p>相反，如果把历史和当前列表无条件拼接，又可能重复展示同一条工具结果。正确做法需要稳定身份、去重、边界或明确的刷新约束。chatStore 中的历史、绘制、团队流、pending alias 与错误测试，正是在约束这些具体情形。</p>
 <p>v2 分页要求原样携带 next_cursor，不能根据新消息数量变化用 offset 自行换算。前端分页协议属于历史一致性设计，不是纯 UI 实现细节。</p>
 <h2 id="测试要抓事件顺序">测试要抓事件顺序<a class="anchor" href="#测试要抓事件顺序" aria-label="链接到本节">#</a></h2>
-<p>一个有价值的前端测试不是只断言“渲染了某段文字”，而是依次注入 token、tool_call、断线、恢复、tool_result、done，再检查归属、状态和结果。</p>
+<p>前端测试可以依次注入 token、tool_call、断线、恢复、tool_result、done，再检查消息归属、状态和结果。只断言文字出现，无法覆盖这条恢复路径。</p>
 <p>也可以测试：审批暂停时刷新历史、成员结束但主持人未结束、历史读取失败但旧内容还在、取消以后收到迟到帧。事件顺序一换，最终静态截图相同，也可能隐藏状态错误。</p>
 <p>这些测试可以离线控制输入，不能替代真实浏览器与后端的联调。本书没有执行 Octop Dashboard 的完整测试。</p>
 <details>

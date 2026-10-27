@@ -233,9 +233,9 @@ blockquote{margin:24px 0;border-left:3px solid var(--brand);padding:1px 20px;col
   .table-wrap table {min-width:560px;font-size:15px;line-height:1.75;table-layout:auto}
   .table-wrap:focus-visible,pre:focus-visible {outline:2px solid var(--eb-accent);outline-offset:4px}
   pre {max-width:100%;tab-size:4;overscroll-behavior-inline:contain;scrollbar-width:thin;box-shadow:none}
-  .prose pre,.content pre {padding:40px 22px 22px}
+  .prose pre,.content pre {padding:54px 22px 22px}
   .prose pre code,.content pre code {font-size:14px;line-height:1.8}
-  .copy {min-height:32px;min-width:52px;top:5px;right:8px;font-size:12px;border-color:color-mix(in srgb,var(--code-ink,var(--ink)) 35%,transparent);background:var(--code);color:var(--code-ink,var(--ink))}
+  .copy {min-height:44px;min-width:52px;top:5px;right:8px;font-size:12px;border-color:color-mix(in srgb,var(--code-ink,var(--ink)) 35%,transparent);background:var(--code);color:var(--code-ink,var(--ink))}
   .book {width:min(100% - 48px,780px);padding-top:46px}
   .home-title {font-size:clamp(34px,4.5vw,52px);line-height:1.3;letter-spacing:0}
   .content h1 {font-size:clamp(30px,3.5vw,42px);line-height:1.45}
@@ -260,7 +260,7 @@ blockquote{margin:24px 0;border-left:3px solid var(--brand);padding:1px 20px;col
   .cover h1 {font-size:clamp(36px,4.5vw,58px);line-height:1.3;letter-spacing:0}
   .cover .intro {line-height:1.85}
   .layout {grid-template-columns:225px minmax(0,780px);gap:52px;max-width:1180px}
-  .layout>main {max-width:780px}
+  .layout>main {max-width:780px;font-size:20px;line-height:1.9}
   .layout h1#cover {font-size:44px;line-height:1.4;letter-spacing:0}
   .layout h1 {line-height:1.5;letter-spacing:0}
   .layout h2 {border-left:0;padding-left:0;margin-top:2em}
@@ -298,6 +298,7 @@ blockquote{margin:24px 0;border-left:3px solid var(--brand);padding:1px 20px;col
     .topbar .brand {max-width:calc(100% - 150px);white-space:normal}
     .reader-tools {flex-wrap:wrap}
     .bar-inner {gap:8px;flex-wrap:wrap}
+    .layout>main {font-size:19px}
     .layout h1#cover {font-size:34px}
     nav.toc {columns:1}
     .search-page {padding-top:36px}
@@ -491,7 +492,7 @@ blockquote{margin:24px 0;border-left:3px solid var(--brand);padding:1px 20px;col
 <p>后面的章节沿着这三个边界展开。比起记住一串类名，这样更容易解释设计为什么发生这些变化。</p>
 <h1 id="chapter-4">第 4 章：一次请求的完整生命周期</h1>
 <p><strong>本章目标：区分消息流、持久历史和模型输入。</strong></p>
-<p>理解新版最有效的路线不是先读所有类，而是跟一条请求走到底。</p>
+<p>先跟踪一条请求，看输入怎样变成模型上下文、工具调用和最终结果。</p>
 <ol>
 <li>CLI、SDK 或 RPC 收到输入。提示模板可先展开，扩展可以处理命令或变换输入。</li>
 <li><code>AgentSession</code> 负责运行准备、模型与工具配置、压缩检查、扩展生命周期和队列。</li>
@@ -583,7 +584,7 @@ text(results.map((r, i) =&gt; r.status === &quot;fulfilled&quot;
   : { path: paths[i], error: String(r.reason) }
 ));
 </code></pre>
-<p><code>Promise.allSettled()</code> 让失败和成功一起交给后续逻辑。它不是“忽略错误”，而是把错误变成你必须检查的数据。并发调用之间必须互不依赖，不能把“写文件”和“马上读取刚写的文件”随意放进同一个并发数组。</p>
+<p><code>Promise.allSettled()</code> 会返回每项调用的成功值或失败原因，后续逻辑需要分别处理。放在同一个并发数组里的调用应互不依赖；写文件后再读取它，要按顺序执行。</p>
 <h3>上下文收益怎么估算</h3>
 <p>下面只是示意，不是 Pi 性能测试。设有 N 个独立调用，每个原始结果 R 个字符，最终每项只需要 S 个字符。</p>
 <pre><code class="language-text">全部原样返回：约 N × R
@@ -592,7 +593,7 @@ text(results.map((r, i) =&gt; r.status === &quot;fulfilled&quot;
 <p>若 N = 12、R = 20,000、S = 300，数据量从约 240,000 个字符变成约 3,600 个字符，再加脚本和结果包装。<strong>字符不是 token</strong>，也不是费用；实际还受工具定义、模型分词、缓存和输出限制影响。这个例子只说明“把不需要的数据留在执行侧”的价值。</p>
 <h3>哪些事不值得套一层脚本</h3>
 <p>只读一个短文件，直接 <code>read</code> 通常更简单；要跑整个项目测试，直接 <code>bash</code> 就可能够了；需要长时间重型计算，QuickJS 也不比专门程序合适。不要为了使用 Code Mode，把本来一行能讲清的请求改成难读程序。</p>
-<p><strong>小结：</strong> 它的核心不是模型会写代码，也不是并行本身，而是把“工具输出到模型上下文”之间增加了一个可编程的数据处理层。</p>
+<p>Code Mode 在工具输出与模型上下文之间增加了可编程的数据处理层，依赖、过滤和聚合都可以在这里完成。</p>
 <aside class="playground" aria-labelledby="demo-title">
 <h3 id="demo-title">动手调一调：多少信息需要跨回模型？</h3>
 <p>修改调用数量与结果大小，观察字段筛选前后的字符量。这里只算数据字符，不估算 token、费用或实际耗时。</p>
@@ -1450,7 +1451,9 @@ updateDemo();
   if (bookNav) {
     const wrapper = document.createElement('details');
     wrapper.className = 'reader-book-toc';
-    wrapper.open = matchMedia('(min-width:1001px)').matches;
+    const wide = matchMedia('(min-width:1001px)');
+    wrapper.open = wide.matches;
+    wide.addEventListener('change', event => { wrapper.open = event.matches; });
     const summary = document.createElement('summary'); summary.textContent = '全书目录';
     bookNav.before(wrapper); wrapper.append(summary, bookNav);
   }
@@ -1493,6 +1496,7 @@ updateDemo();
     const copy = oldButton.cloneNode(true);
     oldButton.replaceWith(copy);
     copy.setAttribute('aria-label', '复制这段代码');
+    copy.setAttribute('aria-live', 'polite');
     copy.addEventListener('click', async () => {
       const code = copy.closest('pre')?.querySelector('code');
       if (!code) return;
@@ -1507,6 +1511,16 @@ updateDemo();
       }
       setTimeout(() => { copy.textContent = '复制'; }, 1600);
     });
+  });
+  // Print folded examples too, then restore the reader's disclosure state.
+  let printDetails = [];
+  addEventListener('beforeprint', () => {
+    printDetails = [...new Set([...printDetails, ...document.querySelectorAll('main details:not([open])')])];
+    printDetails.forEach(details => { details.open = true; });
+  });
+  addEventListener('afterprint', () => {
+    printDetails.forEach(details => { details.open = false; });
+    printDetails = [];
   });
   const links = [...document.querySelectorAll('.chapter-rail a[href^="#"],.reader-mobile-toc a[href^="#"],nav.toc>a[href^="#"]')];
   const headings = [...new Set(links.map(link => document.getElementById(decodeURIComponent(link.hash.slice(1)))).filter(Boolean))];
