@@ -1,15 +1,15 @@
 {
   "branch": "rewrite/agent-ebooks",
   "commits": {
-    "ai-engineer": "c7f982f 2026-10-27 fix(reader): refine prose and responsive reading controls",
-    "agent-memory": "511e87a 2026-10-27 fix(reader): refine prose and responsive reading controls",
-    "ai-infra": "4c080a3 2026-10-27 fix(reader): refine prose and responsive reading controls",
-    "langchain-langgraph": "1464da3 2026-10-27 fix(reader): refine prose and responsive reading controls",
+    "ai-engineer": "b66c49d 2026-10-29 docs(copy): unify reading copy and clarify dense passages",
+    "agent-memory": "e48e776 2026-10-29 docs(copy): unify reading copy and clarify dense passages",
+    "ai-infra": "87c89d0 2026-10-29 docs(copy): unify reading copy and clarify dense passages",
+    "langchain-langgraph": "05469d6 2026-10-29 docs(copy): unify reading copy and clarify dense passages",
     "pi-code-mode": "d94c6e2 2026-10-27 fix(reader): refine prose and responsive reading controls",
     "rag": "8e9febb8b974 2026-10-27 RAG source snapshot",
     "octop": "890111b78796 2026-10-27 Octop source snapshot"
   },
-  "built_at": "2026-10-27T01:58:16.314378+00:00",
+  "built_at": "2026-10-28T18:12:08.484618+00:00",
   "new_illustrations": {
     "ai-engineer": 3,
     "agent-memory": 2,
